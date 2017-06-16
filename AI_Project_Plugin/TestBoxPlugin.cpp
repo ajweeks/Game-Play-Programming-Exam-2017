@@ -23,13 +23,14 @@ TestBoxPlugin::~TestBoxPlugin()
 
 void TestBoxPlugin::Start()
 {
-
 	m_Inventory.resize(INVENTORY_GetCapacity());
 	for (size_t i = 0; i < m_Inventory.size(); i++)
 	{
 		m_Inventory[i].info = {};
 		m_Inventory[i].valid = false;
 	}
+
+	AgentInfo agentInfo = AGENT_GetInfo(); //Contains all Agent Parameters, retrieved by copy!
 
 	//Create behaviours
 	auto pSeekBehaviour = new SteeringBehaviours::Seek();
@@ -64,7 +65,7 @@ void TestBoxPlugin::Start()
 
 	//Create blackboard
 	auto pBlackboard = new Blackboard;
-	pBlackboard->AddData("AgentInfo", &AgentInfo());
+	pBlackboard->AddData("AgentInfo", &agentInfo);
 	pBlackboard->AddData("Target", m_Target);
 	pBlackboard->AddData("TargetSet", false);
 	pBlackboard->AddData("SeekBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pSeekBehaviour));
@@ -73,30 +74,66 @@ void TestBoxPlugin::Start()
 	pBlackboard->AddData("CurrentBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(m_CurrentSteeringBehaviour));
 	pBlackboard->AddData("Inventory", m_Inventory);
 	pBlackboard->AddData("KnownEnemies", m_KnownEnemies);
+	pBlackboard->AddData("MaxHealth", agentInfo.Health);
+	pBlackboard->AddData("MaxEnergy", agentInfo.Energy);
+	pBlackboard->AddData("LongestPistolRange", 0.0f);
+	pBlackboard->AddData("TargetEnemyHash", 0);
+	pBlackboard->AddData("KnownHealthPacks", m_KnownHealthPacks);
+	pBlackboard->AddData("KnownFoodItems", m_KnownFoodItems);
+
+	// Flags behaviours can set to send info back to this class
 	pBlackboard->AddData("ShootPistol", false);
+	pBlackboard->AddData("UseHealthItem", false);
+	pBlackboard->AddData("UseFoodItem", false);
 
 	m_pBehaviourTree = new BehaviourTree(pBlackboard,
 	new BehaviourSelector
 	({
-		new BehaviourSequence
+		new BehaviourSelector // Health
+		({
+			new BehaviourSequence
+			({
+				new BehaviourConditional(LowHealth),
+				new BehaviourConditional(HasHealthItem),
+				new BehaviourAction(UseHealthItem)
+			}),
+			new BehaviourSequence // Search for resources
+			({
+				new BehaviourConditional(LowHealth),
+				new BehaviourConditional(KnowLocationOfHealthPacks),
+				new BehaviourAction(FindKnownHealthPacks)
+			}),
+			new BehaviourSequence // Search for resources
+			({
+				new BehaviourConditional(LowHealth),
+				new BehaviourAction(ChangeToWander) // TODO: Put something more smart here that looks for health packs
+			}),
+		}),
+		new BehaviourSequence // Check energy
+		({
+			new BehaviourConditional(LowEnergy),
+			new BehaviourConditional(HasFoodItem),
+			new BehaviourAction(UseFoodItem)
+		}),
+		new BehaviourSequence // Try to shoot enemies
+		({
+			new BehaviourConditional(HasLoadedPistol),
+			new BehaviourConditional(HasEnemyInFOV),
+			new BehaviourConditional(HasEnemyInRange),
+			new BehaviourAction(AimAtNearestEnemyInFOV),
+			new BehaviourAction(ShootPistol)
+		}),
+		new BehaviourSequence // ~~~~~~~~~~~~~~~DEBUG: Go to clicked point TODO: REMOVE ~~~~~~~~~~~~~~~~~~~~~
 		({
 			new BehaviourConditional(HasTarget),
 			new BehaviourConditional(NotCloseToTarget),
 			new BehaviourAction(ChangeToSeek)
 		}),
-		new BehaviourSelector
-		({
-			new BehaviourSequence
-			({
-				new BehaviourConditional(CloseToEnemy),
-				new BehaviourConditional(HasLoadedPistol),
-				new BehaviourAction(AimAtNearestEnemy),
-				new BehaviourAction(ShootPistol)
-			}),
-			new BehaviourAction(ChangeToWander)
-		})
+		new BehaviourAction(ChangeToWander) // Look for things randomly
 	}));
 
+	m_StartingHealth = agentInfo.Health;
+	m_StartingEnergy = agentInfo.Energy;
 }
 
 PluginOutput TestBoxPlugin::Update(float dt)
@@ -191,6 +228,8 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			}
 			else
 			{
+				// TODO: Display predicted position
+
 				// We already know about this enemy, update our info on it
 				b2Vec2 lastPos = iter->Position;
 				iter->info.Health = enemy.info.Health;
@@ -224,7 +263,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	{
 		Pistol bestPistol = {};
 
-		Item pistolSlot = GetItemFromInventory(0);
+		Item pistolSlot = GetItemFromInventory(m_BestPistolIndex);
 		if (pistolSlot.valid)
 		{
 			// Compare new pistols to current one
@@ -236,18 +275,9 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		for(auto iter = foundPistols.begin(); iter != foundPistols.end(); ++iter)
 		{
 			Pistol pistol = *iter;
-			if (pistol.Ammo == 0 || pistol.DPS == 0 || pistol.Range == 0.0f)
-			{
-				// Don't pick up duds
-				continue;
-			}
+			const float value = GetPistolValue(pistol);
 
-			float value = 0.0f; // How good this pistol is
-			value += pistol.DPS * 1.0f;
-			value += pistol.Range * 0.5f;
-			value += pistol.Ammo * 2.0f;
-
-			if (value > bestValue)
+			if (pistol.fresh && value > bestValue)
 			{
 				bestValue = value;
 				bestPistol = pistol;
@@ -257,10 +287,15 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 		if (bestPistolIter != foundPistols.end())
 		{
-			// TODO: Swap with current if better
-
-			AddItemToInventory(0, bestPistol.itemInfo);
+			m_BestPistolIndex = FirstEmptyInventorySlotID();
+			AddItemToInventory(m_BestPistolIndex, bestPistol.itemInfo);
 			foundPistols.erase(bestPistolIter);
+
+			if (bestPistol.Range > m_LongestPistolRange)
+			{
+				m_LongestPistolRange = bestPistol.Range;
+				m_LongestPistolRangeIndex = m_BestPistolIndex;
+			}
 		}
 	}
 
@@ -283,16 +318,23 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		while (iter != foundHealthPacks.end())
 		{
 			HealthPack healthPack = *iter;
-			int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
-			if (firstEmptyInventorySlot == -1)
+			if (healthPack.fresh)
 			{
-				// TODO: Consider dropping something to make room for this
-				++iter;
+				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
+				if (firstEmptyInventorySlot == -1)
+				{
+					// TODO: Consider dropping something to make room for this
+					++iter;
+				}
+				else
+				{
+					AddItemToInventory(firstEmptyInventorySlot, healthPack.itemInfo);
+					iter = foundHealthPacks.erase(iter);
+				}
 			}
 			else
 			{
-				AddItemToInventory(firstEmptyInventorySlot, healthPack.itemInfo);
-				iter = foundHealthPacks.erase(iter);
+				// TODO: Consider going after health pack
 			}
 		}
 	}
@@ -316,16 +358,23 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		while (iter != foundFood.end())
 		{
 			Food food = *iter;
-			int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
-			if (firstEmptyInventorySlot == -1)
+			if (food.fresh)
 			{
-				// TODO: Consider dropping something to make room for this
-				++iter;
+				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
+				if (firstEmptyInventorySlot == -1)
+				{
+					// TODO: Consider dropping something to make room for this
+					++iter;
+				}
+				else
+				{
+					AddItemToInventory(firstEmptyInventorySlot, food.itemInfo);
+					iter = foundFood.erase(iter);
+				}
 			}
 			else
 			{
-				AddItemToInventory(firstEmptyInventorySlot, food.itemInfo);
-				iter = foundFood.erase(iter);
+				// TODO: Consider going after food
 			}
 		}
 	}
@@ -333,13 +382,13 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	// If still not empty, we aren't picking them all up. Cache for later
 	for (size_t i = 0; i < foundFood.size(); i++)
 	{
-		if (Contains(m_KnownFood, foundFood[i]))
+		if (Contains(m_KnownFoodItems, foundFood[i]))
 		{
-			m_KnownFood[i].fresh = true;
+			m_KnownFoodItems[i].fresh = true;
 		}
 		else
 		{
-			m_KnownFood.push_back(foundFood[i]);
+			m_KnownFoodItems.push_back(foundFood[i]);
 		}
 	}
 
@@ -354,21 +403,20 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		agentInfo.RunMode = false;
 	}
 
-	DEBUG_DrawCircle(agentInfo.Position, agentInfo.GrabRange, { 0, 0, 1 }); //DEBUG_... > Debug helpers (disabled during release build)
-
+	DEBUG_DrawCircle(agentInfo.Position, agentInfo.GrabRange, { 0, 0, 1 });
 	DEBUG_DrawSolidCircle(m_Target.Position, 0.3f, { 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
 
 	Blackboard* pBlackboard = m_pBehaviourTree->GetBlackboard();
 	pBlackboard->ChangeData("AgentInfo", &agentInfo);
 	pBlackboard->ChangeData("KnownEnemies", m_KnownEnemies);
-	m_Target.Position = NAVMESH_GetClosestPathPoint(m_ClickGoal);
 	pBlackboard->ChangeData("Target", m_Target);
-
+	pBlackboard->ChangeData("Inventory", m_Inventory);
 	pBlackboard->ChangeData("TargetSet", m_TargetSet);
+	pBlackboard->ChangeData("LongestPistolRange", m_LongestPistolRange);
 
-	//Determine with random value if box is open or not
 
-	BehaviourState state = m_pBehaviourTree->Update();
+	m_pBehaviourTree->Update();
+
 	
 	pBlackboard->GetData("TargetSet", m_TargetSet);
 	pBlackboard->GetData("CurrentBehaviour", m_CurrentSteeringBehaviour);
@@ -376,9 +424,157 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	pBlackboard->GetData("ShootPistol", shootPistol);
 	if (shootPistol)
 	{
-		DEBUG_LogMessage("Shooting");
-		INVENTORY_UseItem(0);
+		int targetEnemyHash;
+		pBlackboard->GetData("TargetEnemyHash", targetEnemyHash);
+
+		DEBUG_LogMessage("Shooting\n");
+		UseItemInInventory(m_BestPistolIndex);
+		pBlackboard->ChangeData("ShootPistol", false);
+
+		// Check if you killed em (true unless they are still in front of us)
+		bool enemyKilled = true;
+		auto entitiesInFOVUpdated = FOV_GetEntities();
+		for (size_t i = 0; i < entitiesInFOVUpdated.size(); i++)
+		{
+			if (entitiesInFOVUpdated[i].Type == eEntityType::ENEMY)
+			{
+				Enemy enemyInFOV;
+				ConstructEnemy(entitiesInFOVUpdated[i], {}, enemyInFOV);
+				if (enemyInFOV.info.EnemyHash == targetEnemyHash)
+				{
+					enemyKilled = false;
+					break;
+				}
+			}
+		}
+
+		if (enemyKilled)
+		{
+			auto iter = m_KnownEnemies.begin();
+			while (iter != m_KnownEnemies.end())
+			{
+				if (iter->info.EnemyHash == targetEnemyHash)
+				{
+					m_KnownEnemies.erase(iter);
+					break;
+				}
+				else
+				{
+					++iter;
+				}
+			}
+		}
+
+		Item item = GetItemFromInventory(m_BestPistolIndex);
+		Pistol pistol;
+		ConstructPistol(item.info, {}, pistol);
+		if (pistol.Ammo == 0)
+		{
+			RemoveItemFromInventory(m_BestPistolIndex);
+
+			m_BestPistolIndex = -1;
+			float bestValue = 0.0f;
+			int bestPistolIndex = -1;
+			// Check for other pistols to put in this slot
+			for (size_t i = 1; i < m_Inventory.size(); i++)
+			{
+				if (m_Inventory[i].info.Type == eItemType::PISTOL)
+				{
+					Pistol pistol = {};
+					ConstructPistol(m_Inventory[i].info, {}, pistol);
+					const float value = GetPistolValue(pistol);
+					if (value > bestValue)
+					{
+						bestValue = value;
+						bestPistolIndex = i;
+					}
+				}
+			}
+
+			// Set to best pistol index, or -1 if no pistols remain
+			m_BestPistolIndex = bestPistolIndex;
+
+			if (m_BestPistolIndex == -1)
+			{
+				m_LongestPistolRangeIndex = -1;
+				m_LongestPistolRange = 0.0f;
+				pBlackboard->ChangeData("LongestPistolRange", 0.0f);
+			}
+		}
 	}
+
+	bool useHealthItem = false;
+	pBlackboard->GetData("UseHealthItem", useHealthItem);
+	if (useHealthItem)
+	{
+		pBlackboard->ChangeData("UseHealthItem", false);
+		int healingNeeded = (int)(m_StartingHealth - agentInfo.Health);
+		if (healingNeeded > 0)
+		{
+			HealthPack bestHealthPack = {};
+			int bestHealthPackIndex = -1;
+
+			for (size_t i = 0; i < m_Inventory.size(); i++)
+			{
+				if (m_Inventory[i].valid && m_Inventory[i].info.Type == eItemType::HEALTH)
+				{
+					HealthPack pack;
+					ConstructHealthPack(m_Inventory[i].info, {}, pack);
+
+					// Don't use packs that have more healing than we need
+					if (pack.HealingAmount <= healingNeeded &&
+						pack.HealingAmount > bestHealthPack.HealingAmount)
+					{
+						bestHealthPack = pack;
+						bestHealthPackIndex = i;
+					}
+				}
+			}
+
+			if (bestHealthPackIndex != -1)
+			{
+				UseItemInInventory(bestHealthPackIndex);
+				RemoveItemFromInventory(bestHealthPackIndex); // One time use item
+			}
+		}
+	}
+
+	bool useFoodItem = false;
+	pBlackboard->GetData("UseFoodItem", useFoodItem);
+	if (useFoodItem)
+	{
+		pBlackboard->ChangeData("UseFoodItem", false);
+		int energyNeeded = (int)(m_StartingEnergy - agentInfo.Energy);
+		if (energyNeeded > 0.0f)
+		{
+			Food bestFood = {};
+			int bestFoodIndex = -1;
+
+			for (size_t i = 0; i < m_Inventory.size(); i++)
+			{
+				if (m_Inventory[i].valid && m_Inventory[i].info.Type == eItemType::FOOD)
+				{
+					Food food;
+					ConstructFood(m_Inventory[i].info, {}, food);
+
+					// Don't use packs that have more healing than we need
+					if (food.EnergyAmount <= energyNeeded &&
+						food.EnergyAmount > bestFood.EnergyAmount)
+					{
+						bestFood = food;
+						bestFoodIndex = i;
+					}
+				}
+			}
+
+			if (bestFoodIndex != -1)
+			{
+				UseItemInInventory(bestFoodIndex);
+				RemoveItemFromInventory(bestFoodIndex); // One time use item
+			}
+		}
+	}
+
 
 	SteeringOutput steeringOutput = m_CurrentSteeringBehaviour->CalculateSteering(dt, agentInfo);
 
@@ -395,9 +591,9 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	{
 		m_KnownHealthPacks[i].fresh = false;
 	}
-	for (size_t i = 0; i < m_KnownFood.size(); i++)
+	for (size_t i = 0; i < m_KnownFoodItems.size(); i++)
 	{
-		m_KnownFood[i].fresh = false;
+		m_KnownFoodItems[i].fresh = false;
 	}
 
 	return output;
@@ -406,8 +602,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 //Extend the UI [ImGui call only!]
 void TestBoxPlugin::ExtendUI_ImGui()
 {
-	ImGui::Text("Selected Slot: %i", m_SelectedInventorySlot);
-
 	if (!m_KnownEnemies.empty())
 	{
 		ImGui::Text("Known enemies:");
@@ -437,14 +631,14 @@ void TestBoxPlugin::ExtendUI_ImGui()
 				m_KnownHealthPacks[i].HealingAmount);
 		}
 	}
-	if (!m_KnownFood.empty())
+	if (!m_KnownFoodItems.empty())
 	{
 		ImGui::Text("Known food:");
-		for (size_t i = 0; i < m_KnownFood.size(); i++)
+		for (size_t i = 0; i < m_KnownFoodItems.size(); i++)
 		{
 			ImGui::Text("- Position: (%.2f, %.2f)\n  Energy: %i",
-				m_KnownFood[i].Position.x, m_KnownFood[i].Position.y,
-				m_KnownFood[i].EnergyAmount);
+				m_KnownFoodItems[i].Position.x, m_KnownFoodItems[i].Position.y,
+				m_KnownFoodItems[i].EnergyAmount);
 		}
 	}
 }
@@ -482,7 +676,7 @@ void TestBoxPlugin::RemoveItemFromInventory(int slotID)
 {
 	if (slotID < 0 || slotID >= (int)m_Inventory.size()) return;
 
-	if (!m_Inventory[slotID].valid)
+	if (m_Inventory[slotID].valid)
 	{
 		INVENTORY_RemoveItem(slotID);
 		m_Inventory[slotID].info = {};
@@ -515,8 +709,6 @@ void TestBoxPlugin::UseItemInInventory(int slotID)
 	if (m_Inventory[slotID].valid)
 	{
 		INVENTORY_UseItem(slotID);
-		m_Inventory[slotID].info = {};
-		m_Inventory[slotID].valid = false;
 	}
 }
 
@@ -557,10 +749,25 @@ void TestBoxPlugin::ConstructEnemy(const EntityInfo& entityInfo, b2Vec2 Position
 	enemy.InFieldOfView = true;
 }
 
+float TestBoxPlugin::GetPistolValue(const Pistol& pistol)
+{
+	if (pistol.Ammo == 0 || pistol.DPS == 0 || pistol.Range == 0.0f)
+	{
+		// Don't pick up duds
+		return 0.0f;
+	}
+
+	float value = 0.0f;
+	value += pistol.DPS * 1.0f;
+	value += pistol.Range * 0.5f;
+	value += pistol.Ammo * 2.0f;
+
+	return value;
+}
+
 int TestBoxPlugin::FirstEmptyInventorySlotID() const
 {
-	// Start counting at 1 since the first slot is reserved for our best pistol
-	for (size_t i = 1; i < m_Inventory.size(); i++)
+	for (size_t i = 0; i < m_Inventory.size(); i++)
 	{
 		if (!m_Inventory[i].valid)
 		{
@@ -599,27 +806,13 @@ void TestBoxPlugin::ProcessEvents(const SDL_Event& e)
 			SDL_GetMouseState(&x, &y);
 			auto pos = b2Vec2(static_cast<float>(x), static_cast<float>(y));
 			m_ClickGoal = DEBUG_ConvertScreenPosToWorldPos(pos);
+			m_Target.Position = NAVMESH_GetClosestPathPoint(m_ClickGoal);
 			m_TargetSet = true;
 		}
 	}
 	break;
 	case SDL_KEYDOWN:
 	{
-		m_GrabAction = (e.key.keysym.sym == SDLK_SPACE);
-		m_UseItemAction = (e.key.keysym.sym == SDLK_u);
-		m_RemoveItemAction = (e.key.keysym.sym == SDLK_r);
-		if (e.key.keysym.sym == SDLK_LCTRL)
-		{
-			m_RunAction = !m_RunAction;
-		}
-
-		//Slot Selection
-		auto currSlot = m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_0) ? 0 : m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_1) ? 1 : m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_2) ? 2 : m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_3) ? 3 : m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_4) ? 4 : m_SelectedInventorySlot;
 	}
 	break;
 	}

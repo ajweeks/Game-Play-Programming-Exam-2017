@@ -182,8 +182,6 @@ inline bool PointInTriangle(const b2Vec2& point, const b2Vec2& currentTip, const
 }
 
 
-
-
 struct SteeringParams
 {
 	b2Vec2 Position;
@@ -356,17 +354,17 @@ enum eEntityType
 {
 	ENEMY,
 	ITEM
-	//,...
+	// ...
 	, _LASTTYPE = ENEMY //Stores the biggest value of enum type (int)
 };
 
 enum eItemType
 {
-	PISTOL, //Shoot Enemies (Ammo Depletion)
-	HEALTH, //Increments Health
-	FOOD, //Increments Energy
-	GARBAGE //Just Garbage
-			//,...
+	PISTOL, // Shoot Enemies (Ammo Depletion)
+	HEALTH, // Increments Health
+	FOOD,	// Increments Energy
+	GARBAGE // Just Garbage
+			// ...
 	, _LASTITEM = GARBAGE //Stores the biggest value of enum type (int)
 };
 

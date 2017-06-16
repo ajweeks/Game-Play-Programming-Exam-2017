@@ -37,11 +37,7 @@ protected:
 	void ConstructFood(const ItemInfo& itemInfo, b2Vec2 Position, Food& food);
 	void ConstructEnemy(const EntityInfo& entityInfo, b2Vec2 Position, Enemy& enemy);
 
-	bool m_GrabAction = false;
-	bool m_UseItemAction = false;
-	bool m_RemoveItemAction = false;
-	bool m_RunAction = false;
-	int m_SelectedInventorySlot = 0;
+	float GetPistolValue(const Pistol& pistol);
 
 	SteeringBehaviours::ISteeringBehaviour* m_CurrentSteeringBehaviour = nullptr;
 
@@ -54,9 +50,15 @@ protected:
 
 	std::vector<Item> m_Inventory; // Store this ourselves because the engine yells at us when we ask if a certain slot is full
 
+	float m_StartingHealth;
+	float m_StartingEnergy;
+	int m_BestPistolIndex = -1;
+	float m_LongestPistolRange = 0.0f;
+	int m_LongestPistolRangeIndex = -1;
+
 	// Keep track of items that we find but don't pick up to potentially come back to later
 	std::vector<Pistol> m_KnownPistols;
-	std::vector<Food> m_KnownFood;
+	std::vector<Food> m_KnownFoodItems;
 	std::vector<HealthPack> m_KnownHealthPacks;
 	std::vector<Enemy> m_KnownEnemies;
 
