@@ -4,10 +4,6 @@
 
 #include <vector>
 
-struct AgentInfo;
-struct SteeringParams;
-struct SteeringOutput;
-
 namespace SteeringBehaviours
 {
 	class ISteeringBehaviour

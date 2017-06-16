@@ -12,6 +12,12 @@ TestBoxPlugin::TestBoxPlugin():IBehaviourPlugin(GameDebugParams(20, true, false,
 
 TestBoxPlugin::~TestBoxPlugin()
 {
+	for (auto pBehaviour : m_BehaviourVec)
+	{
+		SafeDelete(pBehaviour);
+	}
+	m_BehaviourVec.clear();
+
 	SafeDelete(m_pBehaviourTree);
 }
 
@@ -95,11 +101,17 @@ void TestBoxPlugin::Start()
 
 PluginOutput TestBoxPlugin::Update(float dt)
 {
-	auto worldInfo = WORLD_GetInfo(); //Contains the location of the center of the world and the dimensions
-	auto agentInfo = AGENT_GetInfo(); //Contains all Agent Parameters, retrieved by copy!
+	WorldInfo worldInfo = WORLD_GetInfo(); //Contains the location of the center of the world and the dimensions
+	AgentInfo agentInfo = AGENT_GetInfo(); //Contains all Agent Parameters, retrieved by copy!
 
 	b2Vec2 minCoords = worldInfo.Center - worldInfo.Dimensions / 2.0f;
 	b2Vec2 maxCoords = worldInfo.Center + worldInfo.Dimensions / 2.0f;
+
+	for (size_t i = 0; i < m_KnownEnemies.size(); i++)
+	{
+		m_KnownEnemies[i].InFieldOfView = false;
+		m_KnownEnemies[i].PredictedPosition += m_KnownEnemies[i].Velocity * dt;
+	}
 
 	// Forget about enemies seen before, they've probably moved now
 	std::vector<Enemy> enemiesInFOV;
@@ -122,6 +134,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			{
 				ItemInfo itemInfo = {};
 				ITEM_Grab(entityInfo, itemInfo);
+
 				switch (itemInfo.Type)
 				{
 				case eItemType::PISTOL:
@@ -160,31 +173,39 @@ PluginOutput TestBoxPlugin::Update(float dt)
 					// Ignore
 				} break;
 				default:
-					DEBUG_LogMessage("Unhandled item type: " + itemInfo.Type);
+					DEBUG_LogMessage("Unhandled item type: " + std::to_string(itemInfo.Type) + "\n");
 					break;
 				}
 			}
 		} break;
 		case eEntityType::ENEMY:
 		{
-			EnemyInfo enemyInfo = {};
-			ENEMY_GetInfo(entityInfo, enemyInfo);
-
-			DEBUG_LogMessage("enemy hash: " + enemyInfo.EnemyHash);
-
 			Enemy enemy = {};
-			enemy.info.Health = enemyInfo.Health;
-			enemy.Position = entityInfo.Position;
+			ConstructEnemy(entityInfo, entityInfo.Position, enemy);
 			enemiesInFOV.push_back(enemy);
 
-			if (!Contains(m_KnownEnemies, enemy))
+			std::vector<Enemy>::iterator iter = IndexOf(m_KnownEnemies, enemy);
+			if (iter == m_KnownEnemies.end())
 			{
 				m_KnownEnemies.push_back(enemy);
+			}
+			else
+			{
+				// We already know about this enemy, update our info on it
+				b2Vec2 lastPos = iter->Position;
+				iter->info.Health = enemy.info.Health;
+				iter->Position = entityInfo.Position;
+				iter->PredictedPosition = entityInfo.Position;
+				iter->LastPosition = lastPos;
+				iter->InFieldOfView = true;
+
+				b2Vec2 newVel = entityInfo.Position - lastPos;
+				iter->Velocity = newVel;
 			}
 		} break;
 		default:
 		{
-			DEBUG_LogMessage("Unhandled entity type: " + entityInfo.Type);
+			DEBUG_LogMessage("Unhandled entity type: " + std::to_string(entityInfo.Type) + "\n");
 		} break;
 		}
 	}
@@ -366,66 +387,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	output.LinearVelocity = steeringOutput.LinearVelocity;
 	output.AngularVelocity = steeringOutput.AngularVelocity;
 
-	//if (m_RunAction) output.RunMode = true; //Activates/Deactivates RunMode
-	//output.LinearVelocity = targetVelocity - agentInfo.LinearVelocity;
-	//output.AutoOrientate = false; //Ignores AngularVelocity if true
-	//output.AngularVelocity = b2_pidiv2;
-
-	//INVENTORY Example
-	//if(m_GrabAction)
-	//{
-	//	auto entitiesInFOV = FOV_GetEntities(); //Retrieve Items in FOV
-	//	//Walk to item and grab item for inspection
-	//
-	//	ItemInfo item;
-	//	//Grab Item in range (if there is an item in range)
-	//	//This demo has the GameDebugParam AutoGrabClosestItem to true, ITEM_Grab ignores the given EntityInfo 
-	//	//(normally you should pass a valid EntityInfo, retrieved through FOV_GetEntities)
-	//	if(ITEM_Grab(EntityInfo(), item)) 
-	//	{
-	//		//Check out item
-	//		//Example (using Item MetaData)
-	//		//Extract metadata from items (these are the possibilities, for now... ;) )
-	//		switch (item.Type)
-	//		{
-	//		case PISTOL: //ammo[INT],dps[FLOAT],range[FLOAT]
-	//			int ammo;
-	//			ITEM_GetMetadata(item, "ammo", ammo); //returns bool, use checks (use the correct type)
-	//			float dps;
-	//			ITEM_GetMetadata(item, "dps", dps);
-	//			float range;
-	//			ITEM_GetMetadata(item, "range", range);
-	//			break;
-	//		case HEALTH: //health[INT]
-	//			int health;
-	//			ITEM_GetMetadata(item, "health", health);
-	//			break;
-	//		case FOOD: break;
-	//		case GARBAGE: break;
-	//		default: break;
-	//		}
-	//
-	//		//Must be stored in Inventory during the same frame! (otherwise EntityInfo::EntityHash becomes invalid)
-	//		//So forget about caching the hashes ;) - This would be cheating :P
-	//		INVENTORY_AddItem(m_SelectedInventorySlot, item);
-	//	}
-	//}
-	//
-	//if(m_UseItemAction) //Using an item
-	//{
-	//	INVENTORY_UseItem(m_SelectedInventorySlot); //returns bool
-	//}
-	//
-	//if (m_RemoveItemAction) //Removing an item ('empty' items stay in inventory, you're responsible of removing them)
-	//{
-	//	INVENTORY_RemoveItem(m_SelectedInventorySlot); //again returns bool (do checks)
-	//}
-	//
-	////Reset Action Flags
-	//m_GrabAction = false;
-	//m_UseItemAction = false;
-	//m_RemoveItemAction = false;
-
 	for (size_t i = 0; i < m_KnownPistols.size(); i++)
 	{
 		m_KnownPistols[i].fresh = false;
@@ -447,12 +408,21 @@ void TestBoxPlugin::ExtendUI_ImGui()
 {
 	ImGui::Text("Selected Slot: %i", m_SelectedInventorySlot);
 
+	if (!m_KnownEnemies.empty())
+	{
+		ImGui::Text("Known enemies:");
+		for (size_t i = 0; i < m_KnownEnemies.size(); i++)
+		{
+			ImGui::Text("- Position: (%.2f, %.2f)\n  In FOV: %s",
+				m_KnownEnemies[i].Position.x, m_KnownEnemies[i].Position.y, m_KnownEnemies[i].InFieldOfView ? "true" : "false");
+		}
+	}
 	if (!m_KnownPistols.empty())
 	{
 		ImGui::Text("Known pistols:");
 		for (size_t i = 0; i < m_KnownPistols.size(); i++)
 		{
-			ImGui::Text("- Position: (%.2f, %.2f)\n  Ammo: %i\n  DPS: %.2f\n  Range: %.2f", 
+			ImGui::Text("- Position: (%.2f, %.2f)\n  Ammo: %i\n  DPS: %.2f\n  Range: %.2f",
 				m_KnownPistols[i].Position.x, m_KnownPistols[i].Position.y,
 				m_KnownPistols[i].Ammo, m_KnownPistols[i].DPS, m_KnownPistols[i].Range);
 		}
@@ -481,45 +451,6 @@ void TestBoxPlugin::ExtendUI_ImGui()
 
 void TestBoxPlugin::End()
 {
-}
-
-// [Optional] For Debugging
-void TestBoxPlugin::ProcessEvents(const SDL_Event& e)
-{
-	switch(e.type)
-	{
-	case SDL_MOUSEBUTTONDOWN:
-	{
-		if (e.button.button == SDL_BUTTON_LEFT)
-		{
-			int x, y;
-			SDL_GetMouseState(&x, &y);
-			auto pos = b2Vec2(static_cast<float>(x), static_cast<float>(y));
-			m_ClickGoal = DEBUG_ConvertScreenPosToWorldPos(pos);
-			m_TargetSet = true;
-		}
-	}
-		break;
-	case SDL_KEYDOWN:
-	{
-		m_GrabAction = (e.key.keysym.sym == SDLK_SPACE);
-		m_UseItemAction = (e.key.keysym.sym == SDLK_u);
-		m_RemoveItemAction = (e.key.keysym.sym == SDLK_r);
-		if (e.key.keysym.sym == SDLK_LCTRL)
-		{
-			m_RunAction = !m_RunAction;
-		}
-
-		//Slot Selection
-		auto currSlot = m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_0) ? 0 : m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_1) ? 1 : m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_2) ? 2 : m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_3) ? 3 : m_SelectedInventorySlot;
-		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_4) ? 4 : m_SelectedInventorySlot;
-	}
-		break;
-	}
 }
 
 void TestBoxPlugin::LogOnFail(bool succeeded, const std::string& message)
@@ -615,6 +546,17 @@ void TestBoxPlugin::ConstructFood(const ItemInfo& itemInfo, b2Vec2 Position, Foo
 	food.fresh = true;
 }
 
+void TestBoxPlugin::ConstructEnemy(const EntityInfo& entityInfo, b2Vec2 Position, Enemy& enemy)
+{
+	EnemyInfo enemyInfo = {};
+	ENEMY_GetInfo(entityInfo, enemyInfo);
+
+	enemy.info = enemyInfo;
+	enemy.Position = Position;
+	enemy.LastPosition = Position;
+	enemy.InFieldOfView = true;
+}
+
 int TestBoxPlugin::FirstEmptyInventorySlotID() const
 {
 	// Start counting at 1 since the first slot is reserved for our best pistol
@@ -642,4 +584,43 @@ int TestBoxPlugin::EmptyInventorySlots() const
 	}
 
 	return emptySlots;
+}
+
+// [Optional] For Debugging
+void TestBoxPlugin::ProcessEvents(const SDL_Event& e)
+{
+	switch (e.type)
+	{
+	case SDL_MOUSEBUTTONDOWN:
+	{
+		if (e.button.button == SDL_BUTTON_LEFT)
+		{
+			int x, y;
+			SDL_GetMouseState(&x, &y);
+			auto pos = b2Vec2(static_cast<float>(x), static_cast<float>(y));
+			m_ClickGoal = DEBUG_ConvertScreenPosToWorldPos(pos);
+			m_TargetSet = true;
+		}
+	}
+	break;
+	case SDL_KEYDOWN:
+	{
+		m_GrabAction = (e.key.keysym.sym == SDLK_SPACE);
+		m_UseItemAction = (e.key.keysym.sym == SDLK_u);
+		m_RemoveItemAction = (e.key.keysym.sym == SDLK_r);
+		if (e.key.keysym.sym == SDLK_LCTRL)
+		{
+			m_RunAction = !m_RunAction;
+		}
+
+		//Slot Selection
+		auto currSlot = m_SelectedInventorySlot;
+		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_0) ? 0 : m_SelectedInventorySlot;
+		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_1) ? 1 : m_SelectedInventorySlot;
+		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_2) ? 2 : m_SelectedInventorySlot;
+		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_3) ? 3 : m_SelectedInventorySlot;
+		m_SelectedInventorySlot = (e.key.keysym.sym == SDLK_4) ? 4 : m_SelectedInventorySlot;
+	}
+	break;
+	}
 }

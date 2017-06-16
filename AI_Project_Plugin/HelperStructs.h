@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <iterator>
 
 #undef min
 #undef max
@@ -387,6 +388,11 @@ struct Enemy
 {
 	EnemyInfo info;
 	b2Vec2 Position;
+	b2Vec2 LastPosition;
+	b2Vec2 Velocity;
+
+	bool InFieldOfView;
+	b2Vec2 PredictedPosition; // Used when not in FOV
 };
 bool operator==(const Enemy& lhs, const Enemy& rhs);
 
@@ -500,5 +506,18 @@ bool Contains(const std::vector<T>& vec, const T& t)
 	{
 		if (vec[i] == t) return true;
 	}
+
 	return false;
+}
+
+
+template<typename T>
+typename std::vector<T>::iterator IndexOf(std::vector<T>& vec, T& t)
+{
+	for (std::vector<T>::iterator iter = vec.begin(); iter != vec.end(); ++iter)
+	{
+		if (*iter == t) return iter;
+	}
+
+	return vec.end();
 }

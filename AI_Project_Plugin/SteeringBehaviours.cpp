@@ -12,7 +12,7 @@ namespace SteeringBehaviours
 	{
 		SteeringOutput steering = {};
 
-		auto targetVelocity = (*m_pTargetRef).Position - agentInfo.Position;
+		auto targetVelocity = m_pTargetRef->Position - agentInfo.Position;
 		targetVelocity.Normalize();
 		targetVelocity *= agentInfo.MaxLinearSpeed;
 
@@ -28,7 +28,7 @@ namespace SteeringBehaviours
 		auto distance = (agentInfo.Position - m_pTargetRef->Position).Length();
 		auto t = distance / agentInfo.MaxLinearSpeed;
 
-		auto targetVelocity = (*m_pTargetRef).LinearVelocity;
+		auto targetVelocity = m_pTargetRef->LinearVelocity;
 		targetVelocity.Normalize();
 
 		auto newTarget = SteeringParams(m_pTargetRef->Position + (targetVelocity * t));
@@ -59,7 +59,7 @@ namespace SteeringBehaviours
 		auto distance = (agentInfo.Position - m_pTargetRef->Position).Length();
 		auto t = distance / agentInfo.MaxLinearSpeed;
 
-		auto targetVelocity = (*m_pTargetRef).LinearVelocity;
+		auto targetVelocity = m_pTargetRef->LinearVelocity;
 		targetVelocity.Normalize();
 
 		auto newTarget = SteeringParams(m_pTargetRef->Position + (targetVelocity * t));
@@ -101,8 +101,8 @@ namespace SteeringBehaviours
 	{
 		SteeringOutput steering = {};
 
-		auto targetVelocity = (*m_pTargetRef).Position - agentInfo.Position;
-		auto distance = targetVelocity.Normalize() - m_TargetRadius;
+		b2Vec2 targetVelocity = m_pTargetRef->Position - agentInfo.Position;
+		float distance = targetVelocity.Normalize() - m_TargetRadius;
 
 		if (distance < m_SlowRadius) //Inside SlowRadius
 		{

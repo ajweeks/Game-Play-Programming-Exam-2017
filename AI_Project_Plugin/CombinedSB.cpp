@@ -22,7 +22,7 @@ namespace CombinedSB
 
 		if (totalWeight > 0.0f)
 		{
-			auto scale = 1.0f / totalWeight;
+			float scale = 1.0f / totalWeight;
 			steering /= scale;
 		}
 

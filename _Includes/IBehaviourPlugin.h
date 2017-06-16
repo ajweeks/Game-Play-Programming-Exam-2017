@@ -1,9 +1,9 @@
 #pragma once
 
+#include "../AI_Project_Plugin/HelperStructs.h"
+
 #include <string>
 #include <vector>
-
-#include "../AI_Project_Plugin/HelperStructs.h"
 
 class IBehaviourPlugin
 {

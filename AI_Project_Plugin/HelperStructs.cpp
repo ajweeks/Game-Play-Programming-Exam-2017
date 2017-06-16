@@ -4,9 +4,7 @@
 
 bool operator==(const Enemy& lhs, const Enemy& rhs)
 {
-	return  lhs.Position == rhs.Position &&
-			lhs.info.EnemyHash == rhs.info.EnemyHash &&
-			lhs.info.Health == rhs.info.Health;
+	return lhs.info.EnemyHash == rhs.info.EnemyHash;
 }
 
 bool operator==(const Item& lhs, const Item& rhs)

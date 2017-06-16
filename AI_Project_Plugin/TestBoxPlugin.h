@@ -35,6 +35,7 @@ protected:
 	void ConstructPistol(const ItemInfo& itemInfo, b2Vec2 Position, Pistol& pistol);
 	void ConstructHealthPack(const ItemInfo& itemInfo, b2Vec2 Position, HealthPack& healthPack);
 	void ConstructFood(const ItemInfo& itemInfo, b2Vec2 Position, Food& food);
+	void ConstructEnemy(const EntityInfo& entityInfo, b2Vec2 Position, Enemy& enemy);
 
 	bool m_GrabAction = false;
 	bool m_UseItemAction = false;
