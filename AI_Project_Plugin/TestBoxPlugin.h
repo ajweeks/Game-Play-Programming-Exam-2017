@@ -21,9 +21,8 @@ public:
 
 protected:
 	void LogOnFail(bool succeeded, const std::string& message);
-	bool DecideToPickUpItem(const ItemInfo& itemInfo);
 
-	void AddItemToInventory(int slotID, const ItemInfo& itemInfo);
+	void AddItemToInventory(int slotID, const EntityInfo& entityInfo, const ItemInfo& itemInfo);
 	void RemoveItemFromInventory(int slotID);
 	Item GetItemFromInventory(int slotID);
 	void UseItemInInventory(int slotID);
@@ -32,16 +31,15 @@ protected:
 	int FirstEmptyInventorySlotID() const;
 	int EmptyInventorySlots() const;
 
+	void RemoveFromKnownItems(const EntityInfo& entityInfo);
 	void DetermineInHouseIndex(const b2Vec2& agentPos);
 
 	// Read the appropriate metadata for each item type
-	void ConstructPistol(const ItemInfo& itemInfo, b2Vec2 Position, Pistol& pistol);
-	void ConstructHealthPack(const ItemInfo& itemInfo, b2Vec2 Position, HealthPack& healthPack);
-	void ConstructFood(const ItemInfo& itemInfo, b2Vec2 Position, Food& food);
+	void ConstructPistol(const EntityInfo& entityInfo, const ItemInfo& itemInfo, b2Vec2 Position, Pistol& pistol);
+	void ConstructHealthPack(const EntityInfo& entityInfo, const ItemInfo& itemInfo, b2Vec2 Position, HealthPack& healthPack);
+	void ConstructFood(const EntityInfo& entityInfo, const ItemInfo& itemInfo, b2Vec2 Position, Food& food);
 	void ConstructEnemy(const EntityInfo& entityInfo, b2Vec2 Position, Enemy& enemy);
 	void ConstructHouse(const HouseInfo& houseInfo, House& house);
-
-	float GetPistolValue(const Pistol& pistol);
 
 	SteeringBehaviours::ISteeringBehaviour* m_CurrentSteeringBehaviour = nullptr;
 
@@ -56,7 +54,7 @@ protected:
 	int m_MaxPistolInInventoryCount = 2;
 	int m_MaxItemInInventoryCount = 3; // Max number of any particular item in inventory
 
-	float m_SecondsBetweenHouseRevisits = 20.0f; // How long to wait until visiting a house again
+	float m_SecondsBetweenHouseRevisits = 45.0f; // How long to wait until visiting a house again
 
 	int m_InHouseIndex = -1; // -1 when not in any house
 
@@ -67,6 +65,7 @@ protected:
 	int m_LongestPistolRangeIndex = -1;
 
 	// Keep track of items that we find but don't pick up to potentially come back to later
+	std::vector<EntityInfo> m_KnownItems; // Stores items we've seen in our FOV but we haven't gotten close enough to see their type
 	std::vector<Pistol> m_KnownPistols;
 	std::vector<Food> m_KnownFoodItems;
 	std::vector<HealthPack> m_KnownHealthPacks;

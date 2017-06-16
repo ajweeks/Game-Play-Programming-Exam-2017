@@ -385,6 +385,7 @@ struct EntityInfo
 
 	b2Vec2 Position;
 };
+bool operator==(const EntityInfo& lhs, const EntityInfo& rhs);
 
 struct EnemyInfo
 {
@@ -394,7 +395,8 @@ struct EnemyInfo
 
 struct Enemy
 {
-	EnemyInfo info;
+	EntityInfo entityInfo;
+	EnemyInfo enemyInfo;
 	b2Vec2 Position;
 	b2Vec2 LastPosition;
 	b2Vec2 Velocity;
@@ -412,13 +414,16 @@ struct ItemInfo
 
 struct Item
 {
-	ItemInfo info;
+	EntityInfo entityInfo;
+	ItemInfo itemInfo;
 	bool valid; // False for empty items (instead of nullptr)
 };
 bool operator==(const Item& lhs, const Item& rhs);
 
 struct Pistol
 {
+	float GetValue();
+	EntityInfo entityInfo;
 	ItemInfo itemInfo;
 
 	b2Vec2 Position;
@@ -431,6 +436,7 @@ bool operator==(const Pistol& lhs, const Pistol& rhs);
 
 struct HealthPack
 {
+	EntityInfo entityInfo;
 	ItemInfo itemInfo;
 
 	b2Vec2 Position;
@@ -441,6 +447,7 @@ bool operator==(const HealthPack& lhs, const HealthPack& rhs);
 
 struct Food
 {
+	EntityInfo entityInfo;
 	ItemInfo itemInfo;
 
 	b2Vec2 Position;

@@ -2,15 +2,20 @@
 
 #include "HelperStructs.h"
 
+bool operator==(const EntityInfo& lhs, const EntityInfo& rhs)
+{
+	return lhs.EntityHash == rhs.EntityHash;
+}
+
 bool operator==(const Enemy& lhs, const Enemy& rhs)
 {
-	return lhs.info.EnemyHash == rhs.info.EnemyHash;
+	return lhs.enemyInfo.EnemyHash == rhs.enemyInfo.EnemyHash;
 }
 
 bool operator==(const Item& lhs, const Item& rhs)
 {
-	return	lhs.info.Type == rhs.info.Type && 
-			lhs.info.ItemHash == rhs.info.ItemHash;
+	return	lhs.itemInfo.Type == rhs.itemInfo.Type && 
+			lhs.itemInfo.ItemHash == rhs.itemInfo.ItemHash;
 }
 
 bool operator==(const Pistol& lhs, const Pistol& rhs)
@@ -34,4 +39,20 @@ bool operator==(const House& lhs, const House& rhs)
 {
 	return	lhs.info.Center == rhs.info.Center &&
 			lhs.info.Size == rhs.info.Size;
+}
+
+float Pistol::GetValue()
+{
+	if (Ammo == 0 || DPS == 0 || Range == 0.0f)
+	{
+		// We're a dud!
+		return 0.0f;
+	}
+
+	float value = 0.0f;
+	value += DPS * 1.0f;
+	value += Range * 0.5f;
+	value += Ammo * 2.0f;
+
+	return value;
 }
