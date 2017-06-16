@@ -92,6 +92,17 @@ inline b2Vec2 abs(const b2Vec2 a)
 	return b2Vec2(abs(a.x), abs(a.y));
 }
 
+inline bool PointInAABB(const b2Vec2& point, const b2Vec2& center, const b2Vec2& dimensions)
+{
+	b2Vec2 halfDimensions = dimensions / 2.0f;
+	bool inAABB =	(point.x <= center.x + halfDimensions.x) &&
+					(point.x >= center.x - halfDimensions.x) &&
+					(point.y <= center.y + halfDimensions.y) &&
+					(point.y >= center.y - halfDimensions.y);
+
+	return inAABB;
+}
+
 inline bool PointInTriangleBoundingBox(const b2Vec2& point, const b2Vec2& currentTip, const b2Vec2& previous, const b2Vec2& next)
 {
 	auto xMin = std::min(currentTip.x, std::min(previous.x, next.x)) - FLT_EPSILON;
@@ -189,7 +200,6 @@ struct SteeringParams
 
 	b2Vec2 LinearVelocity;
 	float AngularVelocity;
-	//b2Vec2 NextNavMeshPosition;
 
 	SteeringParams(b2Vec2 position = b2Vec2_zero, float orientation = 0.0f, b2Vec2 linearVel = b2Vec2_zero, 
 		float angularVel = 0.0f) :
@@ -444,7 +454,13 @@ struct HouseInfo
 	b2Vec2 Center;
 	b2Vec2 Size;
 };
-bool operator==(const HouseInfo& lhs, const HouseInfo& rhs);
+
+struct House
+{
+	HouseInfo info;
+	float secondsSinceLastVisit;
+};
+bool operator==(const House& lhs, const House& rhs);
 
 struct WorldInfo
 {

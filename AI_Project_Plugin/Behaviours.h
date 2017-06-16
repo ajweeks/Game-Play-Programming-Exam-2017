@@ -7,7 +7,9 @@
 
 #include <Box2D\Box2D.h>
 
-bool NearestEnemy(const std::vector<Enemy>& enemies, AgentInfo* pAgentInfo, Enemy& nearestEnemy, float& dist)
+
+// Misc
+inline bool NearestEnemy(const std::vector<Enemy>& enemies, AgentInfo* pAgentInfo, Enemy& nearestEnemy, float& dist)
 {
 	if (enemies.empty()) return false;
 
@@ -34,7 +36,7 @@ bool NearestEnemy(const std::vector<Enemy>& enemies, AgentInfo* pAgentInfo, Enem
 	return false;
 }
 
-bool NearestEnemyInFOV(const std::vector<Enemy>& enemies, AgentInfo* pAgentInfo, Enemy& nearestEnemy, float& dist)
+inline bool NearestEnemyInFOV(const std::vector<Enemy>& enemies, AgentInfo* pAgentInfo, Enemy& nearestEnemy, float& dist)
 {
 	if (enemies.empty()) return false;
 
@@ -61,6 +63,95 @@ bool NearestEnemyInFOV(const std::vector<Enemy>& enemies, AgentInfo* pAgentInfo,
 	return false;
 }
 
+inline bool HaveInventorySpace(Blackboard* pBlackboard)
+{
+	std::vector<Item> inventory;
+	float maxHealth = 0;
+	bool dataAvailable = pBlackboard->GetData("Inventory", inventory);
+
+	if (!dataAvailable)
+		return false;
+
+	for (size_t i = 0; i < inventory.size(); i++)
+	{
+		if (!inventory[i].valid)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+inline bool KnownHouseNotRecentlyVisited(Blackboard* pBlackboard)
+{
+	float secondsBetweenRevisits;
+	std::vector<House> knownHouses;
+	float maxHealth = 0;
+	bool dataAvailable =
+		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenRevisits) &&
+		pBlackboard->GetData("KnownHouses", knownHouses);
+
+	if (!dataAvailable || knownHouses.empty())
+		return false;
+
+	for (size_t i = 0; i < knownHouses.size(); i++)
+	{
+		if (knownHouses[i].secondsSinceLastVisit >= secondsBetweenRevisits)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+inline bool CurrentlyInsideHouse(Blackboard* pBlackboard)
+{
+	bool insideHouse;
+	bool dataAvailable = pBlackboard->GetData("InsideHouse", insideHouse);
+
+	if (!dataAvailable)
+		return false;
+
+	return insideHouse;
+}
+
+inline BehaviourState SetTargetToClosestHouseNotRecentlyVisited(Blackboard* pBlackboard)
+{
+	float secondsBetweenRevisits;
+	std::vector<House> knownHouses;
+	float maxHealth = 0;
+	bool dataAvailable =
+		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenRevisits) &&
+		pBlackboard->GetData("KnownHouses", knownHouses);
+
+	if (!dataAvailable)
+		return Failure;
+
+	House closestHouse;
+	int closestHouseIndex = -1;
+	for (size_t i = 0; i < knownHouses.size(); i++)
+	{
+		if (knownHouses[i].secondsSinceLastVisit >= secondsBetweenRevisits)
+		{
+			closestHouse = knownHouses[i];
+			closestHouseIndex = i;
+		}
+	}
+
+	if (closestHouseIndex != -1)
+	{
+		SteeringParams goal = {};
+		goal.Position = closestHouse.info.Center;
+		pBlackboard->ChangeData("Goal", goal);
+		pBlackboard->ChangeData("GoalSet", true);
+		return Success;
+	}
+
+	return Failure;
+}
+
 // Health
 inline bool LowHealth(Blackboard* pBlackboard)
 {
@@ -84,35 +175,50 @@ inline bool LowHealth(Blackboard* pBlackboard)
 
 inline bool KnowLocationOfHealthPacks(Blackboard* pBlackboard)
 {
-	AgentInfo* pAgentInfo = nullptr;
+	std::vector<HealthPack> knownHealthPacks;
 	float maxHealth = 0;
-	bool dataAvailable =
-		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
-		pBlackboard->GetData("MaxHealth", maxHealth);
+	bool dataAvailable = pBlackboard->GetData("KnownHealthPacks", knownHealthPacks);
 
-	if (!dataAvailable || !pAgentInfo)
+	if (!dataAvailable)
 		return false;
 
-	const int neededHealing = (int)(maxHealth - pAgentInfo->Health);
-	if (neededHealing > 0)
-	{
-		return true;
-	}
-
-	return false;
+	return !knownHealthPacks.empty();
 }
 
-inline BehaviourState FindKnownHealthPacks(Blackboard* pBlackboard)
+inline BehaviourState SetClosestKnownHealthPackAsTarget(Blackboard* pBlackboard)
 {
 	AgentInfo* pAgentInfo = nullptr;
-	bool dataAvailable = pBlackboard->GetData("AgentInfo", pAgentInfo);
+	std::vector<HealthPack> knownHealthPacks;
+	float maxHealth = 0;
+	bool dataAvailable = 
+		pBlackboard->GetData("KnownHealthPacks", knownHealthPacks) && 
+		pBlackboard->GetData("AgentInfo", pAgentInfo);
 
-	if (!dataAvailable || !pAgentInfo)
+	if (!dataAvailable)
 		return Failure;
 
-	pBlackboard->ChangeData("UseHealthItem", true);
+	float closestPackDist = FLT_MAX;
+	int closestPackIndex = -1;
+	for (size_t i = 0; i < knownHealthPacks.size(); i++)
+	{
+		float dist = b2Distance(knownHealthPacks[i].Position, pAgentInfo->Position);
+		if (dist < closestPackDist)
+		{
+			closestPackDist = dist;
+			closestPackIndex = i;
+		}
+	}
 
-	return Success;
+	if (closestPackIndex != -1)
+	{
+		SteeringParams goal = {};
+		goal.Position = knownHealthPacks[closestPackIndex].Position;
+		pBlackboard->ChangeData("Goal", goal);
+		pBlackboard->ChangeData("GoalSet", true);
+		return Success;
+	}
+
+	return Failure;
 }
 
 inline bool HasHealthItem(Blackboard* pBlackboard)
@@ -365,35 +471,4 @@ inline BehaviourState ChangeToWander(Blackboard* pBlackboard)
 	}
 
 	return Success;
-}
-
-// Debug behaviours
-inline bool HasTarget(Blackboard* pBlackboard)
-{
-	//Get data
-	auto hasTarget = false;
-	auto dataAvailable = pBlackboard->GetData("TargetSet", hasTarget);
-	if (!dataAvailable)
-		return false;
-
-	return hasTarget;
-}
-
-inline bool NotCloseToTarget(Blackboard* pBlackboard)
-{
-	//Get data
-	AgentInfo* pAgentInfo = nullptr;
-	SteeringParams target = {};
-	auto dataAvailable =
-		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
-		pBlackboard->GetData("Target", target);
-
-	if (!dataAvailable || !pAgentInfo)
-		return false;
-
-	auto distance = b2Distance(target.Position, pAgentInfo->Position);
-	if (distance > pAgentInfo->GrabRange)
-		return true;
-
-	return false;
 }

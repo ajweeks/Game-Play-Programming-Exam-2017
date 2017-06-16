@@ -30,8 +30,8 @@ bool operator==(const Food& lhs, const Food& rhs)
 	return (lhs.EnergyAmount == rhs.EnergyAmount);
 }
 
-bool operator==(const HouseInfo& lhs, const HouseInfo& rhs)
+bool operator==(const House& lhs, const House& rhs)
 {
-	return	lhs.Center == rhs.Center &&
-			lhs.Size == rhs.Size;
+	return	lhs.info.Center == rhs.info.Center &&
+			lhs.info.Size == rhs.info.Size;
 }

@@ -89,6 +89,24 @@ BehaviourState BehaviourConditional::Execute(Blackboard* pBlackBoard)
 	return m_CurrentState = Failure;
 }
 //-----------------------------------------------------------------
+// Behaviour TREE CONDITIONAL INVERSE (IBehaviour)
+//-----------------------------------------------------------------
+BehaviourState BehaviourConditionalInverse::Execute(Blackboard * pBlackBoard)
+{
+	if (m_fpConditional == nullptr)
+		return Failure;
+
+	switch (m_fpConditional(pBlackBoard))
+	{
+	case true:
+		return m_CurrentState = Failure;
+	case false:
+		return m_CurrentState = Success;
+	}
+	return m_CurrentState = Failure;
+}
+
+//-----------------------------------------------------------------
 // Behaviour TREE ACTION (IBehaviour)
 //-----------------------------------------------------------------
 BehaviourState BehaviourAction::Execute(Blackboard* pBlackBoard)
