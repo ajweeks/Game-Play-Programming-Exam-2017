@@ -32,7 +32,6 @@ protected:
 	Item GetItemFromInventory(int slotID);
 	void UseItemInInventory(int slotID);
 
-	//int InventoryItemCount(eItemType itemType);
 	int FirstEmptyInventorySlotID() const;
 	int EmptyInventorySlots() const;
 
@@ -49,7 +48,6 @@ protected:
 	SteeringBehaviours::ISteeringBehaviour* m_CurrentSteeringBehaviour = nullptr;
 
 	BehaviourTree* m_pBehaviourTree = nullptr;
-	//b2Vec2 m_ClickGoal; // Used for debugging
 	SteeringParams m_Goal = {};
 	SteeringParams m_NextNavMeshGoal = {};
 	bool m_GoalSet = false;
@@ -62,12 +60,17 @@ protected:
 	float m_FleeWeightNearEnemies = 1.0f;
 	float m_FleeWeightNotNearEnemies = 0.0f;
 
-	b2Vec2 m_AverageNearbyEnemyLocation;
+	std::vector<b2Vec2> m_SearchPoints;
+	int m_SearchPointIndex;
+
+	b2Vec2 m_AverageNearbyEnemyPosition;
 
 	std::vector<Item> m_Inventory; // Store this ourselves because the engine yells at us when we ask if a certain slot is full
 
 	float m_SecondsBetweenHouseRevisits = 90.0f; // How long to wait until visiting a house again
+	float m_SecondsToEstimateEnemyPositionsFor = 5.0f;
 
+	int m_NextHouseIndex = 0; // Keeps track of which house we're visiting next
 	int m_InHouseIndex = -1; // -1 when not in any house
 
 	float m_StartingHealth;

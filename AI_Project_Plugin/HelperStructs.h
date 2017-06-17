@@ -404,12 +404,13 @@ struct Enemy
 	EntityInfo entityInfo;
 	EnemyInfo enemyInfo;
 	b2Vec2 Position;
+	float Orientation;
 	b2Vec2 LastPosition;
 	b2Vec2 Velocity;
 
 	bool InFieldOfView;
 	b2Vec2 PredictedPosition; // Used when not in FOV
-	float m_SecondsSinceInsideFOV;
+	float SecondsSinceInsideFOV;
 };
 bool operator==(const Enemy& lhs, const Enemy& rhs);
 

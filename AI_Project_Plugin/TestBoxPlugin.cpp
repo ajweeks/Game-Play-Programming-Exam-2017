@@ -38,6 +38,29 @@ void TestBoxPlugin::Start()
 	const b2Vec2 minWorldCoords = worldInfo.Center - worldInfo.Dimensions / 2.0f;
 	const b2Vec2 maxWorldCoords = worldInfo.Center + worldInfo.Dimensions / 2.0f;
 
+	int xCount = 4;
+	int yCount = 3;
+	float edgeBuffer = 60.0f;
+	float searchPointOffsetX = minWorldCoords.x + edgeBuffer;
+	float searchPointOffsetY = minWorldCoords.y + edgeBuffer;
+	float adjustedWorldWidth = (worldInfo.Dimensions.x - edgeBuffer * 2.0f) / (float)(xCount - 1);
+	float adjustedWorldHeight = (worldInfo.Dimensions.y - edgeBuffer * 2.0f) / (float)(yCount - 1);
+	// Generate initial search points
+	for (size_t i = 0; i < xCount; i++)
+	{
+		for (size_t j = 0; j < yCount; j++)
+		{
+			float x = i * adjustedWorldWidth + searchPointOffsetX;
+			float y = j * adjustedWorldHeight + searchPointOffsetY;
+			m_SearchPoints.push_back(b2Vec2(x, y));
+		}
+	}
+	m_SearchPointIndex = 0;
+	SteeringParams firstGoal;
+	firstGoal.Position = m_SearchPoints[0];
+	m_Goal = firstGoal;
+	m_GoalSet = true;
+
 	//Create behaviours
 	auto pSeekBehaviour = new SteeringBehaviours::Seek();
 	pSeekBehaviour->SetTarget(&m_NextNavMeshGoal);
@@ -55,7 +78,7 @@ void TestBoxPlugin::Start()
 	std::vector<CombinedSB::BehaviourAndWeight> behavioursAndWeights;
 	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.1f));
 	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 1.0f));
-	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, m_FleeWeightNotNearEnemies));
+	//behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, m_FleeWeightNotNearEnemies));
 	m_pBlendedBehaviour = new CombinedSB::BlendedSteering(behavioursAndWeights);
 	
 	m_BehaviourVec.push_back(m_pBlendedBehaviour);
@@ -94,17 +117,22 @@ void TestBoxPlugin::Start()
 	pBlackboard->AddData("MaxEnergy", agentInfo.Energy);
 	pBlackboard->AddData("LongestPistolRange", 0.0f);
 	pBlackboard->AddData("TargetEnemyHash", 0);
+	pBlackboard->AddData("NearestEnemyPosition", &m_NearestEnemy);
+	pBlackboard->AddData("AverageNearbyEnemyPostion", m_AverageNearbyEnemyPosition);
 	pBlackboard->AddData("KnownItems", &m_KnownItems);
 	pBlackboard->AddData("KnownHealthPacks", &m_KnownHealthPacks);
 	pBlackboard->AddData("KnownFoodItems", &m_KnownFoodItems);
 	pBlackboard->AddData("KnownPistols", &m_KnownPistols);
 	pBlackboard->AddData("KnownEnemies", &m_KnownEnemies);
 	pBlackboard->AddData("KnownHouses", &m_KnownHouses);
+	pBlackboard->AddData("NextHouseIndex", m_NextHouseIndex);
 	pBlackboard->AddData("SecondsBetweenHouseRevisits", m_SecondsBetweenHouseRevisits);
 	pBlackboard->AddData("InsideHouse", false);
 	pBlackboard->AddData("WorldMinCoords", minWorldCoords);
 	pBlackboard->AddData("WorldMaxCoords", maxWorldCoords);
-	pBlackboard->AddData("NearestEnemyPosition", &m_NearestEnemy);
+
+	pBlackboard->AddData("SearchPoints", &m_SearchPoints);
+	pBlackboard->AddData("SearchPointIndex", m_SearchPointIndex);
 
 	// Flags that behaviours can set to send info back to this class
 	pBlackboard->AddData("ShootPistol", false);
@@ -114,36 +142,56 @@ void TestBoxPlugin::Start()
 	m_pBehaviourTree = new BehaviourTree(pBlackboard,
 	new BehaviourSelector
 	({
-		new BehaviourSequence // Use HEALTH
-		({
-			new BehaviourConditional(LowHealth),
-			new BehaviourConditional(HasHealthItem),
-			new BehaviourAction(UseHealthItem)
-		}),
-		new BehaviourSequence // Use FOOD
-		({
-			new BehaviourConditional(LowEnergy),
-			new BehaviourConditional(HasFoodItem),
-			new BehaviourAction(UseFoodItem)
-		}),
-		new BehaviourSequence // Seek GOAL
+		new BehaviourSequence // Set GOAL to false upon arrival
 		({
 			new BehaviourConditional(IsGoalSet),
 			new BehaviourConditional(HasReachedGoal),
 			new BehaviourAction(SetGoalSetFalse)
 		}),
-		new BehaviourSequence // Seek SOFT GOAL
+		new BehaviourSequence // Set SOFT GOAL to false upon arrival
 		({
 			new BehaviourConditional(IsSoftGoalSet),
 			new BehaviourConditional(HasReachedSoftGoal),
 			new BehaviourAction(SetSoftGoalSetFalse)
 		}),
-		new BehaviourConditional(IsGoalSet), // Don't go any further if a goal is set
-		new BehaviourSequence // Flee from ENEMIES
+		new BehaviourSequence // Use HEALTH
 		({
-			new BehaviourConditional(HasEnemyInFOV), // TODO: Use estimated enemy positions
-			new BehaviourAction(FleeFromNearestEnemy)
+			new BehaviourConditional(NotMaxHealth),
+			new BehaviourConditional(HasHealthItem),
+			new BehaviourAction(UseHealthItem)
 		}),
+		new BehaviourSequence // Use FOOD
+		({
+			new BehaviourConditional(NotMaxEnergy),
+			new BehaviourConditional(HasFoodItem),
+			new BehaviourAction(UseFoodItem)
+		}),
+		new BehaviourSequence // Find items while still searching first time if low on energy
+		({
+			new BehaviourConditional(LowEnergy),
+			new BehaviourAction(SetGoalToNearestHouse),
+			new BehaviourConditional(KnowOfItemsOnGround),
+			new BehaviourAction(SetNearestItemAsGoal)
+		}),
+		new BehaviourSequence // Find items while still searching first time if low on health
+		({
+			new BehaviourConditional(LowHealth),
+			new BehaviourAction(SetGoalToNearestHouse),
+			new BehaviourConditional(KnowOfItemsOnGround),
+			new BehaviourAction(SetNearestItemAsGoal)
+		}),
+		new BehaviourSequence // Search entire map
+		({``
+			new BehaviourConditionalInverse(MapSearchedEntirely),
+			new BehaviourConditional(ArrivedAtNextSearchPoint),
+			new BehaviourAction(IncrementSearchPoint)
+		}),
+		new BehaviourConditionalInverse(MapSearchedEntirely),
+		//new BehaviourSequence // Flee from ENEMIES
+		//({
+		//	new BehaviourConditional(HasEnemyInFOV), // TODO: Use estimated enemy positions
+		//	new BehaviourAction(FleeFromNearestEnemy)
+		//}),
 		new BehaviourSequence // Shoot ENEMIES	
 		({
 			new BehaviourConditional(HasLoadedPistol),
@@ -152,6 +200,7 @@ void TestBoxPlugin::Start()
 			new BehaviourAction(AimAtNearestEnemyInFOV),
 			new BehaviourAction(ShootPistol)
 		}),
+		new BehaviourConditional(IsGoalSet), // Don't go any further if a goal is set
 		//new BehaviourSequence // Search current HOUSE
 		//({
 		//	new BehaviourConditional(CurrentlyInsideHouse),
@@ -166,29 +215,26 @@ void TestBoxPlugin::Start()
 			new BehaviourAction(SetNearestItemAsGoal),
 			//new BehaviourAction(ChangeToSeekTargetSteeringBehaviour)
 		}),
-		new BehaviourSequence // Pick up ITEMS
-		({
-			new BehaviourConditional(CurrentlyInsideHouse),
-			new BehaviourConditionalInverse(KnowOfItemsOnGround),
-			new BehaviourConditionalInverse(IsSoftGoalSet),
-			new BehaviourAction(SetSoftGoalOutsideHouse),
-			//new BehaviourAction(ChangeToOutsideSteeringBehaviour)
-		}),
-		new BehaviourSequence // Search HOUSES
-		({
-			//new BehaviourConditionalInverse(CurrentlyInsideHouse), // Not needed?
-			new BehaviourConditional(KnownHouseNotRecentlyVisited),
-			new BehaviourAction(SetGoalToClosestHouseNotRecentlyVisited),
-			new BehaviourAction(SetSoftGoalSetFalse)
-			//new BehaviourAction(ChangeToSeekTargetSteeringBehaviour)
-		}),
-		new BehaviourSequence // Search HOUSES
-		({
-			new BehaviourConditionalInverse(IsGoalSet),
-			new BehaviourConditionalInverse(IsSoftGoalSet),
-			new BehaviourAction(SetSoftGoalOnOtherSideOfMap),
-			//new BehaviourAction(ChangeToOutsideSteeringBehaviour)
-		})
+		//new BehaviourSequence // Leave HOUSE
+		//({
+			//new BehaviourConditional(CurrentlyInsideHouse),
+			//new BehaviourConditionalInverse(KnowOfItemsOnGround),
+			new BehaviourAction(SetGoalToNextHouse),
+		//}),
+		//new BehaviourSequence // Revisit HOUSE
+		//({
+		//	//new BehaviourConditionalInverse(CurrentlyInsideHouse), // Not needed?
+		//	new BehaviourConditional(KnownHouseNotRecentlyVisited),
+		//	new BehaviourAction(SetGoalToClosestHouseNotRecentlyVisited),
+		//	new BehaviourAction(SetSoftGoalSetFalse)
+		//}),
+		//new BehaviourSequence // Search HOUSES
+		//({
+		//	new BehaviourConditionalInverse(IsGoalSet),
+		//	new BehaviourConditionalInverse(IsSoftGoalSet),
+		//	new BehaviourAction(SetSoftGoalOnOtherSideOfMap),
+		//	//new BehaviourAction(ChangeToOutsideSteeringBehaviour)
+		//})
 	}));
 
 	m_StartingHealth = agentInfo.Health;
@@ -203,11 +249,21 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	b2Vec2 minCoords = worldInfo.Center - worldInfo.Dimensions / 2.0f;
 	b2Vec2 maxCoords = worldInfo.Center + worldInfo.Dimensions / 2.0f;
 
-	for (size_t i = 0; i < m_KnownEnemies.size(); i++)
+	auto iter = m_KnownEnemies.begin();
+	while (iter != m_KnownEnemies.end())
 	{
-		m_KnownEnemies[i].InFieldOfView = false;
-		m_KnownEnemies[i].m_SecondsSinceInsideFOV += dt;
-		m_KnownEnemies[i].PredictedPosition += m_KnownEnemies[i].Velocity * dt;
+		iter->InFieldOfView = false;
+		iter->SecondsSinceInsideFOV += dt;
+		iter->PredictedPosition += iter->Velocity * dt;
+
+		if (iter->SecondsSinceInsideFOV > m_SecondsToEstimateEnemyPositionsFor)
+		{
+			iter = m_KnownEnemies.erase(iter);
+		}
+		else
+		{
+			++iter;
+		}
 	}
 
 	// Forget about enemies seen before, they've probably moved now
@@ -312,7 +368,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				knownEnemy.PredictedPosition = entityInfo.Position;
 				knownEnemy.LastPosition = lastPos;
 				knownEnemy.InFieldOfView = true;
-				knownEnemy.m_SecondsSinceInsideFOV = 0.0f;
+				knownEnemy.SecondsSinceInsideFOV = 0.0f;
 
 				b2Vec2 newVel = entityInfo.Position - lastPos;
 				knownEnemy.Velocity = newVel;
@@ -324,6 +380,16 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		} break;
 		}
 	}
+
+	//if (!m_KnownEnemies.empty())
+	//{
+	//	m_AverageNearbyEnemyPosition = b2Vec2_zero;
+	//	for (size_t i = 0; i < m_KnownEnemies.size(); i++)
+	//	{
+	//		m_AverageNearbyEnemyPosition +=
+	//	}
+	//	m_AverageNearbyEnemyPosition /= m_KnownEnemies.size();
+	//}
 
 	// Add new found houses to cache
 	std::vector<HouseInfo> housesInFOV = FOV_GetHouses();
@@ -504,15 +570,15 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		agentInfo.RunMode = false;
 	}
 
-	if (b2Distance(m_NearestEnemy.Position, agentInfo.Position) < agentInfo.FOV_Range)
+	//if (b2Distance(m_NearestEnemy.Position, agentInfo.Position) < agentInfo.FOV_Range)
 	{
 		//DEBUG_LogMessage("flee weight: %.2f\n", m_FleeWeightNearEnemies);
-		m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNearEnemies);
+		//m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNearEnemies);
 	}
-	else
+	//else
 	{
 		//DEBUG_LogMessage("flee weight: %.2f\n", m_FleeWeightNotNearEnemies);
-		m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNotNearEnemies);
+		//m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNotNearEnemies);
 	}
 
 	Blackboard* pBlackboard = m_pBehaviourTree->GetBlackboard();
@@ -570,6 +636,24 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		}
 	}
 
+	for (size_t i = 0; i < m_KnownHouses.size(); i++)
+	{
+		HouseInfo info = m_KnownHouses[i].info;
+		
+		b2Vec2 points[4] = {
+			b2Vec2(info.Center.x - (info.Size.x / 2.0f + 1.0f), info.Center.y - (info.Size.y / 2.0f + 1.0f)),
+			b2Vec2(info.Center.x - (info.Size.x / 2.0f + 1.0f), info.Center.y + (info.Size.y / 2.0f + 1.0f)),
+			b2Vec2(info.Center.x + (info.Size.x / 2.0f + 1.0f), info.Center.y + (info.Size.y / 2.0f + 1.0f)),
+			b2Vec2(info.Center.x + (info.Size.x / 2.0f + 1.0f), info.Center.y - (info.Size.y / 2.0f + 1.0f))
+		};
+		DEBUG_DrawSolidPolygon(points, 4, { 0.2f, 0.15f, 0.1f }, 1.0f);
+	}
+
+	for (size_t i = 0; i < m_SearchPoints.size(); i++)
+	{
+		DEBUG_DrawCircle(m_SearchPoints[i], 3.0f, { 0.9f, 0.6f, 0.8f, 0.5f });
+	}
+
 	pBlackboard->GetData("CurrentBehaviour", m_CurrentSteeringBehaviour);
 	bool shootPistol = false;
 	pBlackboard->GetData("ShootPistol", shootPistol);
@@ -601,6 +685,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 		if (enemyKilled)
 		{
+			DEBUG_LogMessage("----Killed enemy!\n");
 			auto iter = m_KnownEnemies.begin();
 			while (iter != m_KnownEnemies.end())
 			{
@@ -736,6 +821,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	output.RunMode = agentInfo.RunMode;
 	output.LinearVelocity = steeringOutput.LinearVelocity;
 	output.AngularVelocity = steeringOutput.AngularVelocity;
+	output.AutoOrientate = true;
 
 	for (size_t i = 0; i < m_KnownPistols.size(); i++)
 	{
