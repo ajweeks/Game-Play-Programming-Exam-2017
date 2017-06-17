@@ -49,7 +49,7 @@ inline bool MapSearchedEntirely(Blackboard* pBlackboard)
 	return (searchPointIndex == searchPoints->size());
 }
 
-inline BehaviourState ArrivedAtNextSearchPoint(Blackboard* pBlackboard)
+inline bool ArrivedAtNextSearchPoint(Blackboard* pBlackboard)
 {
 	AgentInfo* pAgentInfo = nullptr;
 	std::vector<b2Vec2>* searchPoints;
@@ -60,35 +60,39 @@ inline BehaviourState ArrivedAtNextSearchPoint(Blackboard* pBlackboard)
 		pBlackboard->GetData("SearchPointIndex", searchPointIndex);
 
 	if (!dataAvailable || !pAgentInfo)
-		return Failure;
+		return false;
 
 	float dist = b2Distance(pAgentInfo->Position, searchPoints->at(searchPointIndex));
 
-	if (dist < pAgentInfo->GrabRange)
+	if (dist < pAgentInfo->GrabRange * 4.0f) // They just have to get somewhat close 
 	{
-		return Success;
+		return true;
 	}
 
-	return Failure;
+	return false;
 }
 
 inline BehaviourState SetGoalToNextSearchPoint(Blackboard* pBlackboard)
 {
+	SteeringParams previousGoal;
 	std::vector<b2Vec2>* searchPoints;
 	int searchPointIndex;
 	bool dataAvailable =
+		pBlackboard->GetData("Goal", previousGoal) &&
 		pBlackboard->GetData("SearchPoints", searchPoints) &&
 		pBlackboard->GetData("SearchPointIndex", searchPointIndex);
 
-	if (!dataAvailable)
+	if (!dataAvailable || searchPointIndex == searchPoints->size())
 		return Failure;
 
-
-	printf("Setting goal back to search point index: %i/%i", searchPointIndex, searchPoints->size());
 	SteeringParams goal;
 	goal.Position = searchPoints->at(searchPointIndex);
-	pBlackboard->ChangeData("Goal", goal);
-	pBlackboard->ChangeData("GoalSet", true);
+	if (previousGoal.Position != goal.Position)
+	{
+		printf("Set goal back to search point index: %i/%i\n", searchPointIndex, searchPoints->size());
+		pBlackboard->ChangeData("Goal", goal);
+		pBlackboard->ChangeData("GoalSet", true);
+	}
 
 	return Success;
 }
@@ -107,9 +111,9 @@ inline BehaviourState IncrementSearchPoint(Blackboard* pBlackboard)
 	int newSearchPointIndex = (searchPointIndex + 1);
 	pBlackboard->ChangeData("SearchPointIndex", newSearchPointIndex);
 
-	if (newSearchPointIndex < searchPoints->size())
+	if (newSearchPointIndex < (int)searchPoints->size())
 	{
-		printf("New search point index: %i/%i", newSearchPointIndex, searchPoints->size());
+		printf("New search point index: %i/%i\n", newSearchPointIndex, searchPoints->size());
 		SteeringParams goal;
 		goal.Position = searchPoints->at(newSearchPointIndex);
 		pBlackboard->ChangeData("Goal", goal);
@@ -117,49 +121,6 @@ inline BehaviourState IncrementSearchPoint(Blackboard* pBlackboard)
 	}
 
 	return Success;
-}
-
-inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
-{
-	AgentInfo* pAgentInfo = nullptr;
-	float secondsBetweenVisits;
-	std::vector<House>* pKnownHouses = nullptr;
-	bool dataAvailable = 
-		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
-		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenVisits) &&
-		pBlackboard->GetData("KnownHouses", pKnownHouses);
-
-	if (!dataAvailable || !pAgentInfo || !pKnownHouses)
-		return Failure;
-
-	int closestHouseIndex = -1;
-	float closestHouseDist = FLT_MAX;
-	for (size_t i = 0; i < pKnownHouses->size(); i++)
-	{
-		House house = pKnownHouses->at(i);
-		
-		if (house.secondsSinceLastVisit > secondsBetweenVisits)
-		{
-			float dist = b2Distance(house.info.Center, pAgentInfo->Position);
-			if (dist < closestHouseDist)
-			{
-				closestHouseDist = dist;
-				closestHouseIndex = i;
-			}
-		}
-	}
-
-	if (closestHouseIndex != -1)
-	{
-		SteeringParams goal;
-		goal.Position = pKnownHouses->at(closestHouseIndex).info.Center;
-		pBlackboard->ChangeData("Goal", goal);
-		pBlackboard->ChangeData("GoalSet", true);
-		return Success;
-	}
-
-
-	return Failure; // Keep running other cases even though this one succeeded
 }
 
 inline bool IsGoalSet(Blackboard* pBlackboard)
@@ -186,47 +147,48 @@ inline bool HasReachedGoal(Blackboard* pBlackboard)
 
 	float dist = b2Distance(goal.Position, pAgentInfo->Position);
 
-	return dist <= pAgentInfo->GrabRange;
+	return dist < pAgentInfo->GrabRange * 0.75f;
 }
 
 inline BehaviourState SetGoalSetFalse(Blackboard* pBlackboard)
 {
+	printf("Reached goal!\n");
 	pBlackboard->ChangeData("GoalSet", false);
 	return Failure; // Continue doing other behaviours
 }
 
-inline bool IsSoftGoalSet(Blackboard* pBlackboard)
-{
-	bool softGoalSet;
-	bool dataAvailable = pBlackboard->GetData("SoftGoalSet", softGoalSet);
-
-	if (!dataAvailable)
-		return false;
-
-	return softGoalSet;
-}
-
-inline bool HasReachedSoftGoal(Blackboard* pBlackboard)
-{
-	SteeringParams softGoal;
-	AgentInfo* pAgentInfo = nullptr;
-	bool dataAvailable =
-		pBlackboard->GetData("SoftGoal", softGoal) &&
-		pBlackboard->GetData("AgentInfo", pAgentInfo);
-
-	if (!dataAvailable || !pAgentInfo)
-		return false;
-
-	float dist = b2Distance(softGoal.Position, pAgentInfo->Position);
-
-	return dist <= pAgentInfo->GrabRange;
-}
-
-inline BehaviourState SetSoftGoalSetFalse(Blackboard* pBlackboard)
-{
-	pBlackboard->ChangeData("SoftGoalSet", false);
-	return Success;
-}
+//inline bool IsSoftGoalSet(Blackboard* pBlackboard)
+//{
+//	bool softGoalSet;
+//	bool dataAvailable = pBlackboard->GetData("SoftGoalSet", softGoalSet);
+//
+//	if (!dataAvailable)
+//		return false;
+//
+//	return softGoalSet;
+//}
+//
+//inline bool HasReachedSoftGoal(Blackboard* pBlackboard)
+//{
+//	SteeringParams softGoal;
+//	AgentInfo* pAgentInfo = nullptr;
+//	bool dataAvailable =
+//		pBlackboard->GetData("SoftGoal", softGoal) &&
+//		pBlackboard->GetData("AgentInfo", pAgentInfo);
+//
+//	if (!dataAvailable || !pAgentInfo)
+//		return false;
+//
+//	float dist = b2Distance(softGoal.Position, pAgentInfo->Position);
+//
+//	return dist <= pAgentInfo->GrabRange;
+//}
+//
+//inline BehaviourState SetSoftGoalSetFalse(Blackboard* pBlackboard)
+//{
+//	pBlackboard->ChangeData("SoftGoalSet", false);
+//	return Success;
+//}
 
 inline bool HaveInventorySpace(Blackboard* pBlackboard)
 {
@@ -272,6 +234,7 @@ inline bool KnowOfItemsOnGround(Blackboard* pBlackboard)
 
 inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 {
+	SteeringParams previousGoal;
 	std::vector<Item>* inventory;
 	std::vector<EntityInfo>* knownItems = nullptr;
 	std::vector<HealthPack>* knownHealthPacks = nullptr;
@@ -281,6 +244,7 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 	float maxHealth = 0;
 	float maxEnergy = 0;
 	bool dataAvailable =
+		pBlackboard->GetData("Goal", previousGoal) &&
 		pBlackboard->GetData("Inventory", inventory) &&
 		pBlackboard->GetData("KnownItems", knownItems) &&
 		pBlackboard->GetData("KnownHealthPacks", knownHealthPacks) &&
@@ -356,9 +320,12 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 		{
 			SteeringParams goal = {};
 			goal.Position = nearestHealthPack.Position;
-			pBlackboard->ChangeData("Goal", goal);
-			pBlackboard->ChangeData("GoalSet", true);
-			printf("Set goal of health\n");
+			if (previousGoal.Position != goal.Position)
+			{
+				printf("Set goal of health\n");
+				pBlackboard->ChangeData("Goal", goal);
+				pBlackboard->ChangeData("GoalSet", true);
+			}
 			return Success;
 		}
 	}
@@ -371,9 +338,12 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 		{
 			SteeringParams goal = {};
 			goal.Position = nearestFoodItem.Position;
-			pBlackboard->ChangeData("Goal", goal);
-			pBlackboard->ChangeData("GoalSet", true);
-			printf("Set goal of food\n");
+			if (previousGoal.Position != goal.Position)
+			{
+				printf("Set goal of food\n");
+				pBlackboard->ChangeData("Goal", goal);
+				pBlackboard->ChangeData("GoalSet", true);
+			}
 			return Success;
 		}
 	}
@@ -383,9 +353,12 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 		Pistol nearestPistol = knownPistols->at(nearestFoodItemIndex);
 		SteeringParams goal = {};
 		goal.Position = nearestPistol.Position;
-		pBlackboard->ChangeData("Goal", goal);
-		pBlackboard->ChangeData("GoalSet", true);
-		printf("Set goal of pistol\n");
+		if (previousGoal.Position != goal.Position)
+		{
+			printf("Set goal of pistol\n");
+			pBlackboard->ChangeData("Goal", goal);
+			pBlackboard->ChangeData("GoalSet", true);
+		}
 		return Success;
 	}
 
@@ -395,13 +368,70 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 		EntityInfo nearestItem = knownItems->at(nearestItemIndex);
 		SteeringParams goal = {};
 		goal.Position = nearestItem.Position;
-		pBlackboard->ChangeData("Goal", goal);
-		pBlackboard->ChangeData("GoalSet", true);
-		printf("Set goal of item\n");
+		if (previousGoal.Position != goal.Position)
+		{
+			printf("Set goal of nearest item!\n");
+			pBlackboard->ChangeData("Goal", goal);
+			pBlackboard->ChangeData("GoalSet", true);
+		}
 		return Success;
 	}
 
 	return Failure;
+}
+
+inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
+{
+	SteeringParams previousGoal;
+	AgentInfo* pAgentInfo = nullptr;
+	float secondsBetweenVisits;
+	std::vector<House>* pKnownHouses = nullptr;
+	bool dataAvailable =
+		pBlackboard->GetData("Goal", previousGoal) &&
+		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
+		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenVisits) &&
+		pBlackboard->GetData("KnownHouses", pKnownHouses);
+
+	if (!dataAvailable || !pAgentInfo || !pKnownHouses)
+		return Failure;
+
+	int closestHouseIndex = -1;
+	float closestHouseDist = FLT_MAX;
+	for (size_t i = 0; i < pKnownHouses->size(); i++)
+	{
+		House house = pKnownHouses->at(i);
+
+		if (house.secondsSinceLastVisit > secondsBetweenVisits)
+		{
+			float dist = b2Distance(house.info.Center, pAgentInfo->Position);
+			if (dist < closestHouseDist)
+			{
+				closestHouseDist = dist;
+				closestHouseIndex = i;
+			}
+		}
+	}
+
+	if (closestHouseIndex == -1 && pKnownHouses->size() > 1)
+	{
+		closestHouseIndex = 1;
+	}
+
+	if (closestHouseIndex != -1)
+	{
+		SteeringParams goal;
+		goal.Position = pKnownHouses->at(closestHouseIndex).info.Center;
+		if (goal.Position != previousGoal.Position)
+		{
+			printf("Set goal of nearest house!\n");
+			pBlackboard->ChangeData("Goal", goal);
+			pBlackboard->ChangeData("GoalSet", true);
+		}
+		return Success;
+	}
+
+
+	return Failure; // Keep running other cases even though this one succeeded
 }
 
 inline bool KnownHouseNotRecentlyVisited(Blackboard* pBlackboard)
@@ -463,15 +493,46 @@ inline BehaviourState SetGoalToClosestHouseNotRecentlyVisited(Blackboard* pBlack
 
 	if (closestHouseIndex != -1)
 	{
+		printf("Set goal of house\n");
 		SteeringParams goal = {};
 		goal.Position = closestHouse.info.Center;
 		pBlackboard->ChangeData("Goal", goal);
 		pBlackboard->ChangeData("GoalSet", true);
-		printf("Set goal of house\n");
 		return Success;
 	}
 
 	return Failure;
+}
+
+inline BehaviourState SetGoalToNextHouse(Blackboard* pBlackboard)
+{
+	AgentInfo* pAgentInfo = nullptr;
+	std::vector<House>* knownHouses;
+	int nextHouseIndex;
+	bool dataAvailable =
+		pBlackboard->GetData("KnownHouses", knownHouses) &&
+		pBlackboard->GetData("NextHouseIndex", nextHouseIndex) &&
+		pBlackboard->GetData("AgentInfo", pAgentInfo);
+
+	if (!dataAvailable || knownHouses->empty())
+		return Failure;
+
+	if (knownHouses->size() == 1 && pAgentInfo->IsInHouse)
+	{
+		return Failure;
+	}
+
+	int newNextHouseIndex = (nextHouseIndex + 1) % knownHouses->size();
+
+	pBlackboard->ChangeData("NextHouseIndex", newNextHouseIndex);
+
+	printf("Set goal of next house, index %i/%i\n", newNextHouseIndex, knownHouses->size());
+	SteeringParams goal;
+	goal.Position = knownHouses->at(newNextHouseIndex).info.Center;
+	pBlackboard->ChangeData("Goal", goal);
+	pBlackboard->ChangeData("GoalSet", true);
+
+	return Success;
 }
 
 // Health
@@ -553,6 +614,7 @@ inline BehaviourState SetClosestKnownHealthPackAsGoal(Blackboard* pBlackboard)
 
 	if (closestPackIndex != -1)
 	{
+		printf("Set goal of closest health pack!\n");
 		SteeringParams goal = {};
 		goal.Position = knownHealthPacks->at(closestPackIndex).Position;
 		pBlackboard->ChangeData("Goal", goal);
@@ -692,6 +754,7 @@ inline BehaviourState SetClosestKnownFoodItemAsGoal(Blackboard* pBlackboard)
 
 	if (closestFoodItemIndex != -1)
 	{
+		printf("Set goal of closest food item!\n");
 		SteeringParams goal = {};
 		goal.Position = knownFoodItems->at(closestFoodItemIndex).Position;
 		pBlackboard->ChangeData("Goal", goal);
@@ -817,36 +880,6 @@ inline BehaviourState ShootPistol(Blackboard* pBlackboard)
 	pBlackboard->ChangeData("ShootPistol", true);
 
 	return Failure; // Keep executing other behaviours
-}
-
-inline BehaviourState SetGoalToNextHouse(Blackboard* pBlackboard)
-{
-	AgentInfo* pAgentInfo = nullptr;
-	std::vector<House>* knownHouses;
-	int nextHouseIndex;
-	bool dataAvailable = 
-		pBlackboard->GetData("KnownHouses", knownHouses) &&
-		pBlackboard->GetData("NextHouseIndex", nextHouseIndex) &&
-		pBlackboard->GetData("AgentInfo", pAgentInfo);
-
-	if (!dataAvailable || knownHouses->empty())
-		return Failure;
-
-	if (knownHouses->size() == 1 && pAgentInfo->IsInHouse)
-	{
-		return Failure;
-	}
-
-	int newNextHouseIndex = (nextHouseIndex + 1) % knownHouses->size();
-
-	pBlackboard->ChangeData("NextHouseIndex", newNextHouseIndex);
-
-	SteeringParams goal;
-	goal.Position = knownHouses->at(newNextHouseIndex).info.Center;
-	pBlackboard->ChangeData("Goal", goal);
-	pBlackboard->ChangeData("GoalSet", true);
-
-	return Success;
 }
 
 //// TODO: Use average of enemy positions in area

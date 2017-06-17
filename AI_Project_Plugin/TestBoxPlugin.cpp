@@ -38,17 +38,17 @@ void TestBoxPlugin::Start()
 	const b2Vec2 minWorldCoords = worldInfo.Center - worldInfo.Dimensions / 2.0f;
 	const b2Vec2 maxWorldCoords = worldInfo.Center + worldInfo.Dimensions / 2.0f;
 
-	int xCount = 4;
+	int xCount = 3;
 	int yCount = 3;
-	float edgeBuffer = 60.0f;
+	float edgeBuffer = 55.0f;
 	float searchPointOffsetX = minWorldCoords.x + edgeBuffer;
 	float searchPointOffsetY = minWorldCoords.y + edgeBuffer;
 	float adjustedWorldWidth = (worldInfo.Dimensions.x - edgeBuffer * 2.0f) / (float)(xCount - 1);
 	float adjustedWorldHeight = (worldInfo.Dimensions.y - edgeBuffer * 2.0f) / (float)(yCount - 1);
 	// Generate initial search points
-	for (size_t i = 0; i < xCount; i++)
+	for (int i = 0; i < xCount; i++)
 	{
-		for (size_t j = 0; j < yCount; j++)
+		for (int j = 0; j < yCount; j++)
 		{
 			float x = i * adjustedWorldWidth + searchPointOffsetX;
 			float y = j * adjustedWorldHeight + searchPointOffsetY;
@@ -76,28 +76,12 @@ void TestBoxPlugin::Start()
 
 	// Search outside behaviour
 	std::vector<CombinedSB::BehaviourAndWeight> behavioursAndWeights;
-	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.1f));
+	//behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.0f));
 	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 1.0f));
-	//behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, m_FleeWeightNotNearEnemies));
+	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, 0.25f));
 	m_pBlendedBehaviour = new CombinedSB::BlendedSteering(behavioursAndWeights);
 	
 	m_BehaviourVec.push_back(m_pBlendedBehaviour);
-
-	// Search inside behaviour
-	//std::vector<CombinedSB::BehaviourAndWeight> searchInsideHouseBehavioursAndWeights;
-	//searchInsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.2f));
-	//searchInsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 0.5f));
-	//searchInsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, 0.5f));
-	//// TODO: Move away from edges of building behaviour?
-	//CombinedSB::BlendedSteering* pInsideHouseSteeringBehaviour = new CombinedSB::BlendedSteering(searchInsideHouseBehavioursAndWeights);
-	//m_BehaviourVec.push_back(pInsideHouseSteeringBehaviour);
-
-	// Seek item
-	//std::vector<CombinedSB::BehaviourAndWeight> seekItemBehavioursAndWeights;
-	//seekItemBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 1.0f));
-	//seekItemBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, 0.2f));
-	//CombinedSB::BlendedSteering* pSeekItemSteeringBehaviour = new CombinedSB::BlendedSteering(seekItemBehavioursAndWeights);
-	//m_BehaviourVec.push_back(pSeekItemSteeringBehaviour);
 
 	m_CurrentSteeringBehaviour = m_pBlendedBehaviour;
 	
@@ -107,8 +91,8 @@ void TestBoxPlugin::Start()
 	pBlackboard->AddData("Goal", m_Goal);
 	pBlackboard->AddData("NextNavMeshGoal", m_NextNavMeshGoal);
 	pBlackboard->AddData("GoalSet", m_GoalSet);
-	pBlackboard->AddData("SoftGoal", m_SoftGoal);
-	pBlackboard->AddData("SoftGoalSet", m_SoftGoalSet);
+	//pBlackboard->AddData("SoftGoal", m_SoftGoal);
+	//pBlackboard->AddData("SoftGoalSet", m_SoftGoalSet);
 	//pBlackboard->AddData("OutsideBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pOutsideHouseSteeringBehaviour));
 	//pBlackboard->AddData("SeekItemBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pSeekItemSteeringBehaviour));
 	pBlackboard->AddData("CurrentBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(m_CurrentSteeringBehaviour));
@@ -148,12 +132,6 @@ void TestBoxPlugin::Start()
 			new BehaviourConditional(HasReachedGoal),
 			new BehaviourAction(SetGoalSetFalse)
 		}),
-		new BehaviourSequence // Set SOFT GOAL to false upon arrival
-		({
-			new BehaviourConditional(IsSoftGoalSet),
-			new BehaviourConditional(HasReachedSoftGoal),
-			new BehaviourAction(SetSoftGoalSetFalse)
-		}),
 		new BehaviourSequence // Use HEALTH
 		({
 			new BehaviourConditional(NotMaxHealth),
@@ -168,24 +146,48 @@ void TestBoxPlugin::Start()
 		}),
 		new BehaviourSequence // Find items while still searching first time if low on energy
 		({
+			//new BehaviourConditional(LowEnergy),
+			new BehaviourConditional(HaveInventorySpace),
+			new BehaviourConditional(KnowOfItemsOnGround),
+			new BehaviourAction(SetNearestItemAsGoal)
+		}),
+		new BehaviourSequence // Find items while still searching first time if low on health
+		({
+			//new BehaviourConditional(LowHealth),
+			new BehaviourConditional(HaveInventorySpace),
+			new BehaviourConditional(KnowOfItemsOnGround),
+			new BehaviourAction(SetNearestItemAsGoal)
+		}),
+		new BehaviourSequence // Find items while still searching first time if low on energy
+		({
 			new BehaviourConditional(LowEnergy),
-			new BehaviourAction(SetGoalToNearestHouse),
 			new BehaviourConditional(KnowOfItemsOnGround),
 			new BehaviourAction(SetNearestItemAsGoal)
 		}),
 		new BehaviourSequence // Find items while still searching first time if low on health
 		({
 			new BehaviourConditional(LowHealth),
-			new BehaviourAction(SetGoalToNearestHouse),
 			new BehaviourConditional(KnowOfItemsOnGround),
 			new BehaviourAction(SetNearestItemAsGoal)
 		}),
-		new BehaviourSequence // Search entire map
-		({``
+		new BehaviourSequence // Find items while still searching first time if low on energy
+		({
+			new BehaviourConditional(LowEnergy),
 			new BehaviourConditionalInverse(MapSearchedEntirely),
-			new BehaviourConditional(ArrivedAtNextSearchPoint),
-			new BehaviourAction(IncrementSearchPoint)
+			new BehaviourAction(SetGoalToNearestHouse),
 		}),
+		new BehaviourSequence // Find items while still searching first time if low on health
+		({
+			new BehaviourConditional(LowHealth),
+			new BehaviourAction(SetGoalToNearestHouse),
+		}),
+		new BehaviourSequence // Search entire map
+		({
+			new BehaviourConditionalInverse(MapSearchedEntirely),
+			new BehaviourAction(SetGoalToNextSearchPoint),
+			new BehaviourConditional(ArrivedAtNextSearchPoint),
+			new BehaviourAction(IncrementSearchPoint),
+	}),
 		new BehaviourConditionalInverse(MapSearchedEntirely),
 		//new BehaviourSequence // Flee from ENEMIES
 		//({
@@ -211,7 +213,7 @@ void TestBoxPlugin::Start()
 			new BehaviourConditionalInverse(IsGoalSet),
 			new BehaviourConditional(HaveInventorySpace),
 			new BehaviourConditional(KnowOfItemsOnGround),
-			new BehaviourAction(SetSoftGoalSetFalse),
+			//new BehaviourAction(SetSoftGoalSetFalse),
 			new BehaviourAction(SetNearestItemAsGoal),
 			//new BehaviourAction(ChangeToSeekTargetSteeringBehaviour)
 		}),
@@ -239,10 +241,14 @@ void TestBoxPlugin::Start()
 
 	m_StartingHealth = agentInfo.Health;
 	m_StartingEnergy = agentInfo.Energy;
+
+	m_SecondsElapsed = 0.0f;
 }
 
 PluginOutput TestBoxPlugin::Update(float dt)
 {
+	m_SecondsElapsed += dt;
+
 	WorldInfo worldInfo = WORLD_GetInfo(); //Contains the location of the center of the world and the dimensions
 	AgentInfo agentInfo = AGENT_GetInfo(); //Contains all Agent Parameters, retrieved by copy!
 
@@ -324,6 +330,16 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				} break;
 				case eItemType::GARBAGE:
 				{
+					int firstFreeInventorySlot = FirstEmptyInventorySlotID();
+					if (firstFreeInventorySlot != -1)
+					{
+						// If we have a space for it, pick up garbage then remvoe it
+						// To get rid of the distraction
+						AddItemToInventory(firstFreeInventorySlot, entityInfo, itemInfo);
+						RemoveItemFromInventory(firstFreeInventorySlot);
+						DEBUG_LogMessage("Disposing of garbage\n");
+					}
+
 					// We didn't actually add it to any list, but still
 					// set this so we don't add it to our list of items
 					addedToList = true;
@@ -381,6 +397,23 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		}
 	}
 
+	// Check if any known items are not in our FOV but we still think they're there
+	if (!m_KnownItems.empty())
+	{
+		auto iter = m_KnownItems.begin();
+		while (iter != m_KnownItems.end())
+		{
+			EntityInfo& knownItem = *iter;
+			if (!Contains(entitiesInFOV, knownItem) && PointInFOV(knownItem.Position, agentInfo))
+			{
+				iter = m_KnownItems.erase(iter);
+			}
+			else
+			{
+				++iter;
+			}
+		}
+	}
 	//if (!m_KnownEnemies.empty())
 	//{
 	//	m_AverageNearbyEnemyPosition = b2Vec2_zero;
@@ -453,7 +486,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			}
 			m_BestPistolIndex = FirstEmptyInventorySlotID();
 			AddItemToInventory(m_BestPistolIndex, bestPistol.entityInfo, bestPistol.itemInfo);
-			RemoveFromKnownItems(bestPistolIter->entityInfo);
 			foundPistols.erase(bestPistolIter);
 
 			if (bestPistol.Range > m_LongestPistolRange)
@@ -488,10 +520,38 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
 				if (firstEmptyInventorySlot == -1)
 				{
-					// TODO: Consider dropping something to make room for this
-					++iter;
+					// Consider dropping something if we have no health but need some
+					const int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
+					if (healthSlotIndex == -1 && agentInfo.Health < m_StartingHealth)
+					{
+						const int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
+						if (pistolSlotIndex != -1)
+						{
+							RemoveItemFromInventory(pistolSlotIndex);
+							firstEmptyInventorySlot = pistolSlotIndex;
+						}
+						else
+						{
+							const int foodSlotIndex = InventoryFirstSlotWithItemType(eItemType::FOOD);
+							if (foodSlotIndex != -1)
+							{
+								RemoveItemFromInventory(foodSlotIndex);
+								firstEmptyInventorySlot = foodSlotIndex;
+							}
+							else
+							{
+								assert(false); // If our inventory doesn't have any health, or pistols, it better have food
+								++iter;
+							}
+						}
+					}
+					else
+					{
+						++iter;
+					}
 				}
-				else
+
+				if (firstEmptyInventorySlot != -1)
 				{
 					AddItemToInventory(firstEmptyInventorySlot, healthPack.entityInfo, healthPack.itemInfo);
 					iter = foundHealthPacks.erase(iter);
@@ -499,7 +559,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			}
 			else
 			{
-				// TODO: Consider going after health pack
 				++iter;
 			}
 		}
@@ -529,10 +588,38 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
 				if (firstEmptyInventorySlot == -1)
 				{
-					// TODO: Consider dropping something to make room for this
-					++iter;
+					const int foodSlotIndex = InventoryFirstSlotWithItemType(eItemType::FOOD);
+					// Consider dropping something if we have not food and need energy
+					if (foodSlotIndex == -1 && agentInfo.Energy < m_StartingEnergy)
+					{
+						int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
+						if (pistolSlotIndex != -1)
+						{
+							RemoveItemFromInventory(pistolSlotIndex);
+							firstEmptyInventorySlot = pistolSlotIndex;
+						}
+						else
+						{
+							int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
+							if (healthSlotIndex != -1)
+							{
+								RemoveItemFromInventory(healthSlotIndex);
+								firstEmptyInventorySlot = healthSlotIndex;
+							}
+							else
+							{
+								assert(false); // If our inventory doesn't have any food, or pistols, it better have health
+								++iter;
+							}
+						}
+					}
+					else
+					{
+						++iter;
+					}
 				}
-				else
+
+				if (firstEmptyInventorySlot != -1)
 				{
 					AddItemToInventory(firstEmptyInventorySlot, food.entityInfo, food.itemInfo);
 					iter = foundFood.erase(iter);
@@ -540,7 +627,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			}
 			else
 			{
-				// TODO: Consider going after food
 				++iter;
 			}
 		}
@@ -593,13 +679,12 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	pBlackboard->ChangeData("KnownHouses", &m_KnownHouses);
 	pBlackboard->ChangeData("InsideHouse", m_InHouseIndex != -1);
 
+
 	m_pBehaviourTree->Update();
+
 
 	bool goalSet;
 	pBlackboard->GetData("GoalSet", goalSet);
-
-	bool softGoalSet;
-	pBlackboard->GetData("SoftGoalSet", softGoalSet);
 
 	if (goalSet)
 	{
@@ -614,19 +699,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			DEBUG_DrawSolidCircle(m_NextNavMeshGoal.Position, 0.3f, { 0.0f, 0.0f }, { 0.0f, 0.5f, 0.5f });
 		}
 	}
-	else if (softGoalSet)
-	{
-		pBlackboard->GetData("SoftGoal", m_SoftGoal);
-		m_NextNavMeshGoal = NAVMESH_GetClosestPathPoint(m_SoftGoal.Position);
-		pBlackboard->ChangeData("NextNavMeshGoal", m_NextNavMeshGoal);
-
-		DEBUG_DrawCircle(agentInfo.Position, agentInfo.GrabRange, { 0, 0, 1 });
-		DEBUG_DrawSolidCircle(m_SoftGoal.Position, 0.4f, { 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f });
-		if (m_NextNavMeshGoal != m_SoftGoal)
-		{
-			DEBUG_DrawSolidCircle(m_NextNavMeshGoal.Position, 0.3f, { 0.0f, 0.0f }, { 0.0f, 0.5f, 0.5f });
-		}
-	}
 
 	for (size_t i = 0; i < m_KnownEnemies.size(); i++)
 	{
@@ -635,6 +707,9 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			DEBUG_DrawCircle(m_KnownEnemies[i].PredictedPosition, 1.5f, { 1.0f, 0.1f, 0.1f , 0.1f });
 		}
 	}
+
+	pBlackboard->GetData("NextHouseIndex", m_NextHouseIndex);
+	pBlackboard->GetData("SearchPointIndex", m_SearchPointIndex);
 
 	for (size_t i = 0; i < m_KnownHouses.size(); i++)
 	{
@@ -646,12 +721,44 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			b2Vec2(info.Center.x + (info.Size.x / 2.0f + 1.0f), info.Center.y + (info.Size.y / 2.0f + 1.0f)),
 			b2Vec2(info.Center.x + (info.Size.x / 2.0f + 1.0f), info.Center.y - (info.Size.y / 2.0f + 1.0f))
 		};
-		DEBUG_DrawSolidPolygon(points, 4, { 0.2f, 0.15f, 0.1f }, 1.0f);
+
+		b2Color color;
+		if (i == m_NextHouseIndex)
+		{
+			color = fmod(m_SecondsElapsed, 1.0f) > 0.5f ? b2Color(0.5f, 0.34f, 0.3f) : b2Color(0.7f, 0.56f, 0.5f);
+		}
+		else
+		{
+			color = b2Color(0.2f, 0.15f, 0.1f);
+		}
+		DEBUG_DrawSolidPolygon(points, 4, color, 1.0f);
+		DEBUG_DrawString(info.Center + info.Size + b2Vec2(2.0f, 2.0f), "%i", i);
 	}
 
-	for (size_t i = 0; i < m_SearchPoints.size(); i++)
+	for (int i = 0; i < (int)m_SearchPoints.size(); i++)
 	{
-		DEBUG_DrawCircle(m_SearchPoints[i], 3.0f, { 0.9f, 0.6f, 0.8f, 0.5f });
+		b2Color color;
+		if (m_SearchPointIndex > i)
+		{
+			color = b2Color(0.9f, 0.9f, 0.85f);
+		}
+		else if (m_SearchPointIndex == i)
+		{
+			color = fmod(m_SecondsElapsed, 1.0f) > 0.5f ? b2Color(0.9f, 0.9f, 0.4f) : b2Color(0.6f, 0.6f, 0.1f);
+		}
+		else
+		{
+			color = b2Color(0.95f, 0.18f, 0.78f);
+		}
+
+		DEBUG_DrawCircle(m_SearchPoints[i], 3.0f, color);
+		DEBUG_DrawCircle(m_SearchPoints[i], 2.0f, color);
+		DEBUG_DrawCircle(m_SearchPoints[i], 1.0f, color);
+	}
+
+	for (size_t i = 0; i < m_KnownItems.size(); i++)
+	{
+		DEBUG_DrawCircle(m_KnownItems[i].Position, 1.0f, { 1.0f, 1.0f, 0.92f });
 	}
 
 	pBlackboard->GetData("CurrentBehaviour", m_CurrentSteeringBehaviour);
@@ -950,6 +1057,52 @@ void TestBoxPlugin::UseItemInInventory(int slotID)
 	{
 		INVENTORY_UseItem(slotID);
 	}
+}
+
+int TestBoxPlugin::InventoryItemCount(eItemType itemType)
+{
+	int count = 0;
+
+	for (size_t i = 0; i < m_Inventory.size(); i++)
+	{
+		if (m_Inventory[i].itemInfo.Type == itemType)
+		{
+			++count;
+		}
+	}
+
+	return count;
+}
+
+int TestBoxPlugin::InventoryFirstSlotWithItemType(eItemType itemType)
+{
+	for (int i = 0; i < (int)m_Inventory.size(); i++)
+	{
+		if (m_Inventory[i].itemInfo.Type == itemType)
+		{
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+bool TestBoxPlugin::PointInFOV(const b2Vec2& point, const AgentInfo& agentInfo)
+{
+	float dist = b2Distance(point, agentInfo.Position);
+	if (dist > agentInfo.FOV_Range)
+	{
+		return false;
+	}
+
+	b2Vec2 dPos = point - agentInfo.Position;
+	b2Vec2 facingDir = b2Vec2(cos(agentInfo.Orientation), sin(agentInfo.Orientation));
+	float dot = b2Dot(facingDir, dPos);
+	dot = Clamp(dot, -1.0f, 1.0f);
+
+	bool inFOV = acos(dot) < agentInfo.FOV_Angle;
+
+	return inFOV;
 }
 
 void TestBoxPlugin::ConstructPistol(const EntityInfo& entityInfo, const ItemInfo& itemInfo, b2Vec2 Position, Pistol& pistol)

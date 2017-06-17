@@ -32,6 +32,11 @@ protected:
 	Item GetItemFromInventory(int slotID);
 	void UseItemInInventory(int slotID);
 
+	int InventoryItemCount(eItemType itemType);
+	int InventoryFirstSlotWithItemType(eItemType itemType);
+
+	bool PointInFOV(const b2Vec2& point, const AgentInfo& agentInfo);
+
 	int FirstEmptyInventorySlotID() const;
 	int EmptyInventorySlots() const;
 
@@ -47,12 +52,14 @@ protected:
 
 	SteeringBehaviours::ISteeringBehaviour* m_CurrentSteeringBehaviour = nullptr;
 
+	float m_SecondsElapsed;
+
 	BehaviourTree* m_pBehaviourTree = nullptr;
 	SteeringParams m_Goal = {};
 	SteeringParams m_NextNavMeshGoal = {};
 	bool m_GoalSet = false;
-	SteeringParams m_SoftGoal = {}; // A general area to go to, if something interesting is spotted on the way here, look at it
-	bool m_SoftGoalSet = false;
+	//SteeringParams m_SoftGoal = {}; // A general area to go to, if something interesting is spotted on the way here, look at it
+	//bool m_SoftGoalSet = false;
 	SteeringParams m_NearestEnemy = {};
 	std::vector<SteeringBehaviours::ISteeringBehaviour*> m_BehaviourVec = {};
 	CombinedSB::BlendedSteering* m_pBlendedBehaviour = nullptr;
