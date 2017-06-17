@@ -64,7 +64,7 @@ inline bool ArrivedAtNextSearchPoint(Blackboard* pBlackboard)
 
 	float dist = b2Distance(pAgentInfo->Position, searchPoints->at(searchPointIndex));
 
-	if (dist < pAgentInfo->GrabRange * 4.0f) // They just have to get somewhat close 
+	if (dist < pAgentInfo->GrabRange * 4.0f) // Agent just has to get somewhat close 
 	{
 		return true;
 	}
@@ -113,7 +113,7 @@ inline BehaviourState IncrementSearchPoint(Blackboard* pBlackboard)
 
 	if (newSearchPointIndex < (int)searchPoints->size())
 	{
-		printf("New search point index: %i/%i\n", newSearchPointIndex, searchPoints->size());
+		printf("Set new search point index: %i/%i\n", newSearchPointIndex, searchPoints->size());
 		SteeringParams goal;
 		goal.Position = searchPoints->at(newSearchPointIndex);
 		pBlackboard->ChangeData("Goal", goal);
@@ -152,7 +152,6 @@ inline bool HasReachedGoal(Blackboard* pBlackboard)
 
 inline BehaviourState SetGoalSetFalse(Blackboard* pBlackboard)
 {
-	printf("Reached goal!\n");
 	pBlackboard->ChangeData("GoalSet", false);
 	return Failure; // Continue doing other behaviours
 }
@@ -414,7 +413,9 @@ inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
 
 	if (closestHouseIndex == -1 && pKnownHouses->size() > 1)
 	{
-		closestHouseIndex = 1;
+		// No houses that we haven't visited recently
+		// Just keep searching new houses
+		return SetGoalToNextSearchPoint(pBlackboard);
 	}
 
 	if (closestHouseIndex != -1)
@@ -431,7 +432,7 @@ inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
 	}
 
 
-	return Failure; // Keep running other cases even though this one succeeded
+	return Failure;
 }
 
 inline bool KnownHouseNotRecentlyVisited(Blackboard* pBlackboard)
@@ -654,7 +655,7 @@ inline BehaviourState UseHealthItem(Blackboard* pBlackboard)
 
 	pBlackboard->ChangeData("UseHealthItem", true);
 
-	return Success;
+	return Failure; // Continue with other sequences (we might not be hurt enough to use health yet)
 }
 
 // Food
@@ -775,7 +776,12 @@ inline BehaviourState UseFoodItem(Blackboard* pBlackboard)
 
 	pBlackboard->ChangeData("UseFoodItem", true);
 
-	return Failure; // Keep running other cases even though this one succeeded
+	return Failure; // Continue with other sequences (we might not be hungry enough to eat yet)
+}
+
+inline bool LowEnergyOrHealth(Blackboard* pBlackboard)
+{
+	return LowEnergy(pBlackboard) || LowHealth(pBlackboard);
 }
 
 // Shooting
@@ -860,27 +866,22 @@ inline BehaviourState AimAtNearestEnemyInFOV(Blackboard* pBlackboard)
 
 	float dist;
 	Enemy nearestEnemy;
-
 	if (NearestEnemyInFOV(knownEnemies, pAgentInfo, nearestEnemy, dist))
 	{
-		// They're in our sights! Fire!
-		printf("Set goal to nearest enemy!\n");
-		SteeringParams goal;
-		goal.Position = nearestEnemy.Position;
-		pBlackboard->ChangeData("Goal", goal);
-		pBlackboard->ChangeData("GoalSet", true);
+		printf("Aiming at nearest enemy! (enemy hash %i)\n", nearestEnemy.enemyInfo.EnemyHash);
+		pBlackboard->ChangeData("TargetEnemy", nearestEnemy);
 		return Success;
 	}
 
 	return Failure;
 }
 
-inline BehaviourState ShootPistol(Blackboard* pBlackboard)
-{
-	pBlackboard->ChangeData("ShootPistol", true);
-
-	return Failure; // Keep executing other behaviours
-}
+//inline BehaviourState ShootPistol(Blackboard* pBlackboard)
+//{
+//	pBlackboard->ChangeData("ShootPistol", true);
+//
+//	return Failure; // Keep executing other behaviours
+//}
 
 //// TODO: Use average of enemy positions in area
 //inline BehaviourState FleeFromNearestEnemy(Blackboard* pBlackboard)

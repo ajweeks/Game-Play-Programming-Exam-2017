@@ -53,6 +53,9 @@ protected:
 	SteeringBehaviours::ISteeringBehaviour* m_CurrentSteeringBehaviour = nullptr;
 
 	float m_SecondsElapsed;
+	float m_SecondsSinceNavMeshTargetUpdate;
+	float m_SecondsBetweenNavMeshTargetUpdates = 0.2f;
+	Enemy m_EmptyTargetEnemy;
 
 	BehaviourTree* m_pBehaviourTree = nullptr;
 	SteeringParams m_Goal = {};

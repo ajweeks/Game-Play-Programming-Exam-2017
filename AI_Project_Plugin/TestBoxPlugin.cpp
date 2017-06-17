@@ -40,7 +40,7 @@ void TestBoxPlugin::Start()
 
 	int xCount = 3;
 	int yCount = 3;
-	float edgeBuffer = 55.0f;
+	float edgeBuffer = 45.0f;
 	float searchPointOffsetX = minWorldCoords.x + edgeBuffer;
 	float searchPointOffsetY = minWorldCoords.y + edgeBuffer;
 	float adjustedWorldWidth = (worldInfo.Dimensions.x - edgeBuffer * 2.0f) / (float)(xCount - 1);
@@ -60,6 +60,7 @@ void TestBoxPlugin::Start()
 	firstGoal.Position = m_SearchPoints[0];
 	m_Goal = firstGoal;
 	m_GoalSet = true;
+	m_NextNavMeshGoal = NAVMESH_GetClosestPathPoint(m_Goal.Position);
 
 	//Create behaviours
 	auto pSeekBehaviour = new SteeringBehaviours::Seek();
@@ -84,6 +85,9 @@ void TestBoxPlugin::Start()
 	m_BehaviourVec.push_back(m_pBlendedBehaviour);
 
 	m_CurrentSteeringBehaviour = m_pBlendedBehaviour;
+
+	m_EmptyTargetEnemy = {};
+	m_EmptyTargetEnemy.enemyInfo.EnemyHash = -1;
 	
 	//Create blackboard
 	auto pBlackboard = new Blackboard;
@@ -100,7 +104,7 @@ void TestBoxPlugin::Start()
 	pBlackboard->AddData("MaxHealth", agentInfo.Health);
 	pBlackboard->AddData("MaxEnergy", agentInfo.Energy);
 	pBlackboard->AddData("LongestPistolRange", 0.0f);
-	pBlackboard->AddData("TargetEnemyHash", 0);
+	pBlackboard->AddData("TargetEnemy", m_EmptyTargetEnemy);
 	pBlackboard->AddData("NearestEnemyPosition", &m_NearestEnemy);
 	pBlackboard->AddData("AverageNearbyEnemyPostion", m_AverageNearbyEnemyPosition);
 	pBlackboard->AddData("KnownItems", &m_KnownItems);
@@ -144,105 +148,49 @@ void TestBoxPlugin::Start()
 			new BehaviourConditional(HasFoodItem),
 			new BehaviourAction(UseFoodItem)
 		}),
-		new BehaviourSequence // Find items while still searching first time if low on energy
+		new BehaviourSequence // Find ITEMS
 		({
-			//new BehaviourConditional(LowEnergy),
 			new BehaviourConditional(HaveInventorySpace),
 			new BehaviourConditional(KnowOfItemsOnGround),
 			new BehaviourAction(SetNearestItemAsGoal)
 		}),
-		new BehaviourSequence // Find items while still searching first time if low on health
+		new BehaviourSequence // Find ITEMS (even with no inventory space, we can trade things out)
 		({
-			//new BehaviourConditional(LowHealth),
-			new BehaviourConditional(HaveInventorySpace),
+			new BehaviourConditional(LowEnergyOrHealth),
 			new BehaviourConditional(KnowOfItemsOnGround),
 			new BehaviourAction(SetNearestItemAsGoal)
 		}),
-		new BehaviourSequence // Find items while still searching first time if low on energy
+		new BehaviourSequence // Go to nearest HOUSE
 		({
-			new BehaviourConditional(LowEnergy),
-			new BehaviourConditional(KnowOfItemsOnGround),
-			new BehaviourAction(SetNearestItemAsGoal)
-		}),
-		new BehaviourSequence // Find items while still searching first time if low on health
-		({
-			new BehaviourConditional(LowHealth),
-			new BehaviourConditional(KnowOfItemsOnGround),
-			new BehaviourAction(SetNearestItemAsGoal)
-		}),
-		new BehaviourSequence // Find items while still searching first time if low on energy
-		({
-			new BehaviourConditional(LowEnergy),
+			new BehaviourConditionalInverse(KnowOfItemsOnGround),
+			new BehaviourConditional(LowEnergyOrHealth),
 			new BehaviourConditionalInverse(MapSearchedEntirely),
-			new BehaviourAction(SetGoalToNearestHouse),
-		}),
-		new BehaviourSequence // Find items while still searching first time if low on health
-		({
-			new BehaviourConditional(LowHealth),
-			new BehaviourAction(SetGoalToNearestHouse),
+			new BehaviourAction(SetGoalToNearestHouse)
 		}),
 		new BehaviourSequence // Search entire map
 		({
 			new BehaviourConditionalInverse(MapSearchedEntirely),
 			new BehaviourAction(SetGoalToNextSearchPoint),
 			new BehaviourConditional(ArrivedAtNextSearchPoint),
-			new BehaviourAction(IncrementSearchPoint),
-	}),
-		new BehaviourConditionalInverse(MapSearchedEntirely),
-		//new BehaviourSequence // Flee from ENEMIES
-		//({
-		//	new BehaviourConditional(HasEnemyInFOV), // TODO: Use estimated enemy positions
-		//	new BehaviourAction(FleeFromNearestEnemy)
-		//}),
-		new BehaviourSequence // Shoot ENEMIES	
+			new BehaviourAction(IncrementSearchPoint)
+		}),
+		new BehaviourSequence // Shoot ENEMIES
 		({
 			new BehaviourConditional(HasLoadedPistol),
 			new BehaviourConditional(HasEnemyInRange),
 			new BehaviourConditional(HasEnemyInFOV),
-			new BehaviourAction(AimAtNearestEnemyInFOV),
-			new BehaviourAction(ShootPistol)
+			new BehaviourAction(AimAtNearestEnemyInFOV)
 		}),
+		new BehaviourConditionalInverse(MapSearchedEntirely), // Don't go any further if map hasn't been fully searched
 		new BehaviourConditional(IsGoalSet), // Don't go any further if a goal is set
-		//new BehaviourSequence // Search current HOUSE
-		//({
-		//	new BehaviourConditional(CurrentlyInsideHouse),
-		//	new BehaviourAction(ChangeToInsideSteeringBehaviour)
-		//}),
-		new BehaviourSequence // Pick up ITEMS
-		({
-			new BehaviourConditionalInverse(IsGoalSet),
-			new BehaviourConditional(HaveInventorySpace),
-			new BehaviourConditional(KnowOfItemsOnGround),
-			//new BehaviourAction(SetSoftGoalSetFalse),
-			new BehaviourAction(SetNearestItemAsGoal),
-			//new BehaviourAction(ChangeToSeekTargetSteeringBehaviour)
-		}),
-		//new BehaviourSequence // Leave HOUSE
-		//({
-			//new BehaviourConditional(CurrentlyInsideHouse),
-			//new BehaviourConditionalInverse(KnowOfItemsOnGround),
-			new BehaviourAction(SetGoalToNextHouse),
-		//}),
-		//new BehaviourSequence // Revisit HOUSE
-		//({
-		//	//new BehaviourConditionalInverse(CurrentlyInsideHouse), // Not needed?
-		//	new BehaviourConditional(KnownHouseNotRecentlyVisited),
-		//	new BehaviourAction(SetGoalToClosestHouseNotRecentlyVisited),
-		//	new BehaviourAction(SetSoftGoalSetFalse)
-		//}),
-		//new BehaviourSequence // Search HOUSES
-		//({
-		//	new BehaviourConditionalInverse(IsGoalSet),
-		//	new BehaviourConditionalInverse(IsSoftGoalSet),
-		//	new BehaviourAction(SetSoftGoalOnOtherSideOfMap),
-		//	//new BehaviourAction(ChangeToOutsideSteeringBehaviour)
-		//})
+		new BehaviourAction(SetGoalToNextHouse)
 	}));
 
 	m_StartingHealth = agentInfo.Health;
 	m_StartingEnergy = agentInfo.Energy;
 
 	m_SecondsElapsed = 0.0f;
+	m_SecondsSinceNavMeshTargetUpdate = 0.0f;
 }
 
 PluginOutput TestBoxPlugin::Update(float dt)
@@ -398,22 +346,24 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	}
 
 	// Check if any known items are not in our FOV but we still think they're there
-	if (!m_KnownItems.empty())
-	{
-		auto iter = m_KnownItems.begin();
-		while (iter != m_KnownItems.end())
-		{
-			EntityInfo& knownItem = *iter;
-			if (!Contains(entitiesInFOV, knownItem) && PointInFOV(knownItem.Position, agentInfo))
-			{
-				iter = m_KnownItems.erase(iter);
-			}
-			else
-			{
-				++iter;
-			}
-		}
-	}
+	//if (!m_KnownItems.empty())
+	//{
+	//	auto iter = m_KnownItems.begin();
+	//	while (iter != m_KnownItems.end())
+	//	{
+	//		EntityInfo& knownItem = *iter;
+	//		if (!Contains(entitiesInFOV, knownItem) && PointInFOV(knownItem.Position, agentInfo))
+	//		{
+	//			iter = m_KnownItems.erase(iter);
+	//		}
+	//		else
+	//		{
+	//			++iter;
+	//		}
+	//	}
+	//}
+
+
 	//if (!m_KnownEnemies.empty())
 	//{
 	//	m_AverageNearbyEnemyPosition = b2Vec2_zero;
@@ -574,6 +524,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		else
 		{
 			m_KnownHealthPacks.push_back(foundHealthPacks[i]);
+			RemoveFromKnownItems(foundHealthPacks[i].entityInfo);
 		}
 	}
 
@@ -642,6 +593,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		else
 		{
 			m_KnownFoodItems.push_back(foundFood[i]);
+			RemoveFromKnownItems(foundHealthPacks[i].entityInfo);
 		}
 	}
 
@@ -678,28 +630,34 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	pBlackboard->ChangeData("KnownEnemies", &m_KnownEnemies);
 	pBlackboard->ChangeData("KnownHouses", &m_KnownHouses);
 	pBlackboard->ChangeData("InsideHouse", m_InHouseIndex != -1);
-
+	pBlackboard->ChangeData("TargetEnemy", m_EmptyTargetEnemy);
 
 	m_pBehaviourTree->Update();
 
+	bool goalWasSet = m_GoalSet;
+	pBlackboard->GetData("GoalSet", m_GoalSet);
 
-	bool goalSet;
-	pBlackboard->GetData("GoalSet", goalSet);
+	m_SecondsSinceNavMeshTargetUpdate += dt;
 
-	if (goalSet)
+	if (m_GoalSet)
 	{
 		pBlackboard->GetData("Goal", m_Goal);
-		m_NextNavMeshGoal = NAVMESH_GetClosestPathPoint(m_Goal.Position);
-		pBlackboard->ChangeData("NextNavMeshGoal", m_NextNavMeshGoal);
+		if (m_GoalSet != goalWasSet || m_SecondsSinceNavMeshTargetUpdate > m_SecondsBetweenNavMeshTargetUpdates)
+		{
+			m_SecondsSinceNavMeshTargetUpdate = 0.0f;
+			m_NextNavMeshGoal = NAVMESH_GetClosestPathPoint(m_Goal.Position);
+			pBlackboard->ChangeData("NextNavMeshGoal", m_NextNavMeshGoal);
+		}
 
-		DEBUG_DrawCircle(agentInfo.Position, agentInfo.GrabRange, { 0, 0, 1 });
+		DEBUG_DrawCircle(agentInfo.Position, agentInfo.GrabRange, { 0.0f, 0.0f, 1.0f });
 		DEBUG_DrawSolidCircle(m_Goal.Position, 0.4f, { 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
 		if (m_NextNavMeshGoal != m_Goal)
 		{
-			DEBUG_DrawSolidCircle(m_NextNavMeshGoal.Position, 0.3f, { 0.0f, 0.0f }, { 0.0f, 0.5f, 0.5f });
+			DEBUG_DrawSolidCircle(m_NextNavMeshGoal.Position, 0.4f, { 0.0f, 0.0f }, { 0.0f, 0.5f, 0.5f });
 		}
 	}
 
+	// Draw debuging helpers
 	for (size_t i = 0; i < m_KnownEnemies.size(); i++)
 	{
 		if (!m_KnownEnemies[i].InFieldOfView)
@@ -716,23 +674,24 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		HouseInfo info = m_KnownHouses[i].info;
 		
 		b2Vec2 points[4] = {
-			b2Vec2(info.Center.x - (info.Size.x / 2.0f + 1.0f), info.Center.y - (info.Size.y / 2.0f + 1.0f)),
-			b2Vec2(info.Center.x - (info.Size.x / 2.0f + 1.0f), info.Center.y + (info.Size.y / 2.0f + 1.0f)),
-			b2Vec2(info.Center.x + (info.Size.x / 2.0f + 1.0f), info.Center.y + (info.Size.y / 2.0f + 1.0f)),
-			b2Vec2(info.Center.x + (info.Size.x / 2.0f + 1.0f), info.Center.y - (info.Size.y / 2.0f + 1.0f))
+			b2Vec2(info.Center.x - (info.Size.x / 2.0f + 2.0f), info.Center.y - (info.Size.y / 2.0f + 2.0f)),
+			b2Vec2(info.Center.x - (info.Size.x / 2.0f + 2.0f), info.Center.y + (info.Size.y / 2.0f + 2.0f)),
+			b2Vec2(info.Center.x + (info.Size.x / 2.0f + 2.0f), info.Center.y + (info.Size.y / 2.0f + 2.0f)),
+			b2Vec2(info.Center.x + (info.Size.x / 2.0f + 2.0f), info.Center.y - (info.Size.y / 2.0f + 2.0f))
 		};
 
 		b2Color color;
-		if (i == m_NextHouseIndex)
+		if (i == m_NextHouseIndex && m_SearchPointIndex == m_SearchPoints.size())
 		{
 			color = fmod(m_SecondsElapsed, 1.0f) > 0.5f ? b2Color(0.5f, 0.34f, 0.3f) : b2Color(0.7f, 0.56f, 0.5f);
 		}
 		else
 		{
-			color = b2Color(0.2f, 0.15f, 0.1f);
+			color = b2Color(0.12f, 0.10f, 0.08f);
 		}
 		DEBUG_DrawSolidPolygon(points, 4, color, 1.0f);
-		DEBUG_DrawString(info.Center + info.Size + b2Vec2(2.0f, 2.0f), "%i", i);
+		// Broken:
+		//DEBUG_DrawString(info.Center + info.Size / 2.0f + b2Vec2(2.0f, 2.0f), "%i", i);
 	}
 
 	for (int i = 0; i < (int)m_SearchPoints.size(); i++)
@@ -761,90 +720,107 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		DEBUG_DrawCircle(m_KnownItems[i].Position, 1.0f, { 1.0f, 1.0f, 0.92f });
 	}
 
-	pBlackboard->GetData("CurrentBehaviour", m_CurrentSteeringBehaviour);
-	bool shootPistol = false;
-	pBlackboard->GetData("ShootPistol", shootPistol);
-	if (shootPistol)
+	float angularSteering = 0.0f;
+	bool overrideAutoOrient = true;
+
+	Enemy targetEnemy;
+	pBlackboard->GetData("TargetEnemy", targetEnemy);
+	if (targetEnemy.enemyInfo.EnemyHash != m_EmptyTargetEnemy.enemyInfo.EnemyHash)
 	{
-		int targetEnemyHash;
-		pBlackboard->GetData("TargetEnemyHash", targetEnemyHash);
+		overrideAutoOrient = false;
 
-		DEBUG_LogMessage("----Shooting pistol\n");
-		UseItemInInventory(m_BestPistolIndex);
-		pBlackboard->ChangeData("ShootPistol", false);
+		b2Vec2 dPos = targetEnemy.Position - agentInfo.Position;
 
-		// Check if you killed em (true unless they are still in front of us)
-		bool enemyKilled = true;
-		auto entitiesInFOVUpdated = FOV_GetEntities();
-		for (size_t i = 0; i < entitiesInFOVUpdated.size(); i++)
+		float currOrientation = agentInfo.Orientation;
+		float targetOrientation = GetOrientationFromVelocity(dPos);
+		angularSteering = targetEnemy.Orientation - currOrientation;
+
+		bool shootPistol = false;
+
+		float dist = b2Distance(agentInfo.Position, targetEnemy.Position);
+		b2Vec2 forward = b2Vec2(cos(agentInfo.Orientation), sin(agentInfo.Orientation));
+		b2Vec2 testPoint = agentInfo.Position + forward * dist; // Slightly fishy calculation, but works well
+
+		if (shootPistol)
 		{
-			if (entitiesInFOVUpdated[i].Type == eEntityType::ENEMY)
-			{
-				Enemy enemyInFOV;
-				ConstructEnemy(entitiesInFOVUpdated[i], {}, enemyInFOV);
-				if (enemyInFOV.enemyInfo.EnemyHash == targetEnemyHash)
-				{
-					enemyKilled = false;
-					break;
-				}
-			}
-		}
+			DEBUG_LogMessage("----Shooting pistol\n");
+			UseItemInInventory(m_BestPistolIndex);
+			pBlackboard->ChangeData("ShootPistol", false);
 
-		if (enemyKilled)
-		{
-			DEBUG_LogMessage("----Killed enemy!\n");
-			auto iter = m_KnownEnemies.begin();
-			while (iter != m_KnownEnemies.end())
+			// Check if you killed em (true unless they are still in front of us)
+			bool enemyKilled = true;
+			auto entitiesInFOVUpdated = FOV_GetEntities();
+			for (size_t i = 0; i < entitiesInFOVUpdated.size(); i++)
 			{
-				if (iter->enemyInfo.EnemyHash == targetEnemyHash)
+				if (entitiesInFOVUpdated[i].Type == eEntityType::ENEMY)
 				{
-					m_KnownEnemies.erase(iter);
-					break;
-				}
-				else
-				{
-					++iter;
-				}
-			}
-		}
-
-		Item item = GetItemFromInventory(m_BestPistolIndex);
-		Pistol pistol;
-		ConstructPistol(item.entityInfo, item.itemInfo, {}, pistol);
-		if (pistol.Ammo == 0)
-		{
-			RemoveItemFromInventory(m_BestPistolIndex);
-
-			m_BestPistolIndex = -1;
-			float bestValue = 0.0f;
-			int bestPistolIndex = -1;
-			// Check for other pistols to put in this slot
-			for (size_t i = 1; i < m_Inventory.size(); i++)
-			{
-				if (m_Inventory[i].itemInfo.Type == eItemType::PISTOL)
-				{
-					Pistol pistol = {};
-					ConstructPistol(m_Inventory[i].entityInfo, m_Inventory[i].itemInfo, {}, pistol);
-					const float value = pistol.GetValue();
-					if (value > bestValue)
+					Enemy enemyInFOV;
+					ConstructEnemy(entitiesInFOVUpdated[i], {}, enemyInFOV);
+					if (enemyInFOV.enemyInfo.EnemyHash == targetEnemy.enemyInfo.EnemyHash)
 					{
-						bestValue = value;
-						bestPistolIndex = i;
+						enemyKilled = false;
+						break;
 					}
 				}
 			}
 
-			// Set to best pistol index, or -1 if no pistols remain
-			m_BestPistolIndex = bestPistolIndex;
-
-			if (m_BestPistolIndex == -1)
+			if (enemyKilled)
 			{
-				m_LongestPistolRangeIndex = -1;
-				m_LongestPistolRange = 0.0f;
-				pBlackboard->ChangeData("LongestPistolRange", 0.0f);
+				DEBUG_LogMessage("----Killed enemy!\n");
+				auto iter = m_KnownEnemies.begin();
+				while (iter != m_KnownEnemies.end())
+				{
+					if (iter->enemyInfo.EnemyHash == targetEnemy.enemyInfo.EnemyHash)
+					{
+						m_KnownEnemies.erase(iter);
+						break;
+					}
+					else
+					{
+						++iter;
+					}
+				}
+			}
+
+			Item item = GetItemFromInventory(m_BestPistolIndex);
+			Pistol pistol;
+			ConstructPistol(item.entityInfo, item.itemInfo, {}, pistol);
+			if (pistol.Ammo == 0)
+			{
+				RemoveItemFromInventory(m_BestPistolIndex);
+
+				m_BestPistolIndex = -1;
+				float bestValue = 0.0f;
+				int bestPistolIndex = -1;
+				// Check for other pistols to put in this slot
+				for (size_t i = 1; i < m_Inventory.size(); i++)
+				{
+					if (m_Inventory[i].itemInfo.Type == eItemType::PISTOL)
+					{
+						Pistol pistol = {};
+						ConstructPistol(m_Inventory[i].entityInfo, m_Inventory[i].itemInfo, {}, pistol);
+						const float value = pistol.GetValue();
+						if (value > bestValue)
+						{
+							bestValue = value;
+							bestPistolIndex = i;
+						}
+					}
+				}
+
+				// Set to best pistol index, or -1 if no pistols remain
+				m_BestPistolIndex = bestPistolIndex;
+
+				if (m_BestPistolIndex == -1)
+				{
+					m_LongestPistolRangeIndex = -1;
+					m_LongestPistolRange = 0.0f;
+					pBlackboard->ChangeData("LongestPistolRange", 0.0f);
+				}
 			}
 		}
 	}
+
 
 	bool useHealthItem = false;
 	pBlackboard->GetData("UseHealthItem", useHealthItem);
@@ -921,14 +897,15 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	}
 
 
+	pBlackboard->GetData("CurrentBehaviour", m_CurrentSteeringBehaviour);
 	SteeringOutput steeringOutput = m_CurrentSteeringBehaviour->CalculateSteering(dt, agentInfo);
 
 
 	PluginOutput output = {};
 	output.RunMode = agentInfo.RunMode;
 	output.LinearVelocity = steeringOutput.LinearVelocity;
-	output.AngularVelocity = steeringOutput.AngularVelocity;
-	output.AutoOrientate = true;
+	output.AngularVelocity = overrideAutoOrient ? angularSteering : steeringOutput.AngularVelocity;
+	output.AutoOrientate = overrideAutoOrient;
 
 	for (size_t i = 0; i < m_KnownPistols.size(); i++)
 	{
