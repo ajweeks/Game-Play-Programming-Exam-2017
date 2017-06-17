@@ -409,6 +409,7 @@ struct Enemy
 
 	bool InFieldOfView;
 	b2Vec2 PredictedPosition; // Used when not in FOV
+	float m_SecondsSinceInsideFOV;
 };
 bool operator==(const Enemy& lhs, const Enemy& rhs);
 

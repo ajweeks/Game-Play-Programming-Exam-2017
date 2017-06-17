@@ -5,6 +5,11 @@
 
 #include <vector>
 
+namespace CombinedSB
+{
+	class BlendedSteering;
+}
+
 class BehaviourTree;
 
 class TestBoxPlugin : public IBehaviourPlugin
@@ -27,7 +32,7 @@ protected:
 	Item GetItemFromInventory(int slotID);
 	void UseItemInInventory(int slotID);
 
-	int InventoryItemCount(eItemType itemType);
+	//int InventoryItemCount(eItemType itemType);
 	int FirstEmptyInventorySlotID() const;
 	int EmptyInventorySlots() const;
 
@@ -52,11 +57,14 @@ protected:
 	bool m_SoftGoalSet = false;
 	SteeringParams m_NearestEnemy = {};
 	std::vector<SteeringBehaviours::ISteeringBehaviour*> m_BehaviourVec = {};
+	CombinedSB::BlendedSteering* m_pBlendedBehaviour = nullptr;
+	size_t m_FleeBehaviourWeightPairIndex = 2;
+	float m_FleeWeightNearEnemies = 1.0f;
+	float m_FleeWeightNotNearEnemies = 0.0f;
+
+	b2Vec2 m_AverageNearbyEnemyLocation;
 
 	std::vector<Item> m_Inventory; // Store this ourselves because the engine yells at us when we ask if a certain slot is full
-
-	int m_MaxPistolInInventoryCount = 2;
-	int m_MaxItemInInventoryCount = 3; // Max number of any particular item in inventory
 
 	float m_SecondsBetweenHouseRevisits = 90.0f; // How long to wait until visiting a house again
 

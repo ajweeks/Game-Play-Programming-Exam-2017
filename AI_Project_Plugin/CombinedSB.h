@@ -23,6 +23,7 @@ namespace CombinedSB
 		{}
 		virtual ~BlendedSteering() {};
 
+		void SetBehaviourWeight(size_t behaviourIndex, float newWeight);
 		void AddBehaviour(BehaviourAndWeight pair) { m_WeightedBehavioursVec.push_back(pair); }
 
 		SteeringOutput CalculateSteering(float deltaT, const AgentInfo& agentInfo) override;

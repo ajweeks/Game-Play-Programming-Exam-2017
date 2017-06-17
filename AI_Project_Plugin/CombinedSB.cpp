@@ -28,6 +28,11 @@ namespace CombinedSB
 
 		return steering;
 	}
+	void BlendedSteering::SetBehaviourWeight(size_t behaviourIndex, float newWeight)
+	{
+		m_WeightedBehavioursVec[behaviourIndex].Weight = newWeight;
+	}
+
 
 	//PRIORITY STEERING
 	//*****************

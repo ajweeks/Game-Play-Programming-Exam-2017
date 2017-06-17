@@ -8,7 +8,7 @@
 #include "CombinedSB.h"
 
 TestBoxPlugin::TestBoxPlugin():
-	IBehaviourPlugin(GameDebugParams(20, true, false, false, false, 2.0f))
+	IBehaviourPlugin(GameDebugParams(20, false, false, false, false, 3.0f))
 {
 }
 
@@ -52,12 +52,13 @@ void TestBoxPlugin::Start()
 	//m_BehaviourVec.push_back(pSeekOtherSideOfMapBehaviour);
 
 	// Search outside behaviour
-	std::vector<CombinedSB::BehaviourAndWeight> searchOutsideHouseBehavioursAndWeights;
-	searchOutsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.1f));
-	searchOutsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 1.0f));
-	searchOutsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, 0.2f));
-	CombinedSB::BlendedSteering* pOutsideHouseSteeringBehaviour = new CombinedSB::BlendedSteering(searchOutsideHouseBehavioursAndWeights);
-	m_BehaviourVec.push_back(pOutsideHouseSteeringBehaviour);
+	std::vector<CombinedSB::BehaviourAndWeight> behavioursAndWeights;
+	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.1f));
+	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 1.0f));
+	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, m_FleeWeightNotNearEnemies));
+	m_pBlendedBehaviour = new CombinedSB::BlendedSteering(behavioursAndWeights);
+	
+	m_BehaviourVec.push_back(m_pBlendedBehaviour);
 
 	// Search inside behaviour
 	//std::vector<CombinedSB::BehaviourAndWeight> searchInsideHouseBehavioursAndWeights;
@@ -75,7 +76,7 @@ void TestBoxPlugin::Start()
 	//CombinedSB::BlendedSteering* pSeekItemSteeringBehaviour = new CombinedSB::BlendedSteering(seekItemBehavioursAndWeights);
 	//m_BehaviourVec.push_back(pSeekItemSteeringBehaviour);
 
-	m_CurrentSteeringBehaviour = pOutsideHouseSteeringBehaviour;
+	m_CurrentSteeringBehaviour = m_pBlendedBehaviour;
 	
 	//Create blackboard
 	auto pBlackboard = new Blackboard;
@@ -113,6 +114,18 @@ void TestBoxPlugin::Start()
 	m_pBehaviourTree = new BehaviourTree(pBlackboard,
 	new BehaviourSelector
 	({
+		new BehaviourSequence // Use HEALTH
+		({
+			new BehaviourConditional(LowHealth),
+			new BehaviourConditional(HasHealthItem),
+			new BehaviourAction(UseHealthItem)
+		}),
+		new BehaviourSequence // Use FOOD
+		({
+			new BehaviourConditional(LowEnergy),
+			new BehaviourConditional(HasFoodItem),
+			new BehaviourAction(UseFoodItem)
+		}),
 		new BehaviourSequence // Seek GOAL
 		({
 			new BehaviourConditional(IsGoalSet),
@@ -131,26 +144,14 @@ void TestBoxPlugin::Start()
 			new BehaviourConditional(HasEnemyInFOV), // TODO: Use estimated enemy positions
 			new BehaviourAction(FleeFromNearestEnemy)
 		}),
-		new BehaviourSequence // Use HEALTH
+		new BehaviourSequence // Shoot ENEMIES	
 		({
-			new BehaviourConditional(LowHealth),
-			new BehaviourConditional(HasHealthItem),
-			new BehaviourAction(UseHealthItem)
+			new BehaviourConditional(HasLoadedPistol),
+			new BehaviourConditional(HasEnemyInRange),
+			new BehaviourConditional(HasEnemyInFOV),
+			new BehaviourAction(AimAtNearestEnemyInFOV),
+			new BehaviourAction(ShootPistol)
 		}),
-		new BehaviourSequence // Use FOOD
-		({
-			new BehaviourConditional(LowEnergy),
-			new BehaviourConditional(HasFoodItem),
-			new BehaviourAction(UseFoodItem)
-		}),
-		//new BehaviourSequence // Shoot ENEMIES	
-		//({
-		//	new BehaviourConditional(HasLoadedPistol),
-		//	new BehaviourConditional(HasEnemyInRange),
-		//	new BehaviourConditional(HasEnemyInFOV),
-		//	new BehaviourAction(AimAtNearestEnemyInFOV),
-		//	new BehaviourAction(ShootPistol)
-		//}),
 		//new BehaviourSequence // Search current HOUSE
 		//({
 		//	new BehaviourConditional(CurrentlyInsideHouse),
@@ -158,10 +159,11 @@ void TestBoxPlugin::Start()
 		//}),
 		new BehaviourSequence // Pick up ITEMS
 		({
+			new BehaviourConditionalInverse(IsGoalSet),
 			new BehaviourConditional(HaveInventorySpace),
 			new BehaviourConditional(KnowOfItemsOnGround),
+			new BehaviourAction(SetSoftGoalSetFalse),
 			new BehaviourAction(SetNearestItemAsGoal),
-			new BehaviourAction(SetSoftGoalSetFalse)
 			//new BehaviourAction(ChangeToSeekTargetSteeringBehaviour)
 		}),
 		new BehaviourSequence // Pick up ITEMS
@@ -182,6 +184,7 @@ void TestBoxPlugin::Start()
 		}),
 		new BehaviourSequence // Search HOUSES
 		({
+			new BehaviourConditionalInverse(IsGoalSet),
 			new BehaviourConditionalInverse(IsSoftGoalSet),
 			new BehaviourAction(SetSoftGoalOnOtherSideOfMap),
 			//new BehaviourAction(ChangeToOutsideSteeringBehaviour)
@@ -203,6 +206,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	for (size_t i = 0; i < m_KnownEnemies.size(); i++)
 	{
 		m_KnownEnemies[i].InFieldOfView = false;
+		m_KnownEnemies[i].m_SecondsSinceInsideFOV += dt;
 		m_KnownEnemies[i].PredictedPosition += m_KnownEnemies[i].Velocity * dt;
 	}
 
@@ -300,18 +304,18 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			}
 			else
 			{
-				// TODO: Display predicted position
-
 				// We already know about this enemy, update our info on it
-				b2Vec2 lastPos = iter->Position;
-				iter->enemyInfo.Health = enemy.enemyInfo.Health;
-				iter->Position = entityInfo.Position;
-				iter->PredictedPosition = entityInfo.Position;
-				iter->LastPosition = lastPos;
-				iter->InFieldOfView = true;
+				Enemy& knownEnemy = *iter;
+				b2Vec2 lastPos = knownEnemy.Position;
+				knownEnemy.enemyInfo.Health = enemy.enemyInfo.Health;
+				knownEnemy.Position = entityInfo.Position;
+				knownEnemy.PredictedPosition = entityInfo.Position;
+				knownEnemy.LastPosition = lastPos;
+				knownEnemy.InFieldOfView = true;
+				knownEnemy.m_SecondsSinceInsideFOV = 0.0f;
 
 				b2Vec2 newVel = entityInfo.Position - lastPos;
-				iter->Velocity = newVel;
+				knownEnemy.Velocity = newVel;
 			}
 		} break;
 		default:
@@ -379,11 +383,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			int previousBestPistolIndex = m_BestPistolIndex;
 			if (previousBestPistolIndex != -1)
 			{
-				int pistolCount = InventoryItemCount(eItemType::PISTOL);
-				if (pistolCount + 1 >= m_MaxPistolInInventoryCount)
-				{
-					RemoveItemFromInventory(m_BestPistolIndex);
-				}
+				RemoveItemFromInventory(m_BestPistolIndex);
 			}
 			m_BestPistolIndex = FirstEmptyInventorySlotID();
 			AddItemToInventory(m_BestPistolIndex, bestPistol.entityInfo, bestPistol.itemInfo);
@@ -417,31 +417,23 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		while (iter != foundHealthPacks.end())
 		{
 			HealthPack healthPack = *iter;
-			int healthPackCount = InventoryItemCount(eItemType::HEALTH);
-			if (healthPackCount < m_MaxItemInInventoryCount)
+			if (healthPack.fresh)
 			{
-				if (healthPack.fresh)
+				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
+				if (firstEmptyInventorySlot == -1)
 				{
-					int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
-					if (firstEmptyInventorySlot == -1)
-					{
-						// TODO: Consider dropping something to make room for this
-						++iter;
-					}
-					else
-					{
-						AddItemToInventory(firstEmptyInventorySlot, healthPack.entityInfo, healthPack.itemInfo);
-						iter = foundHealthPacks.erase(iter);
-					}
+					// TODO: Consider dropping something to make room for this
+					++iter;
 				}
 				else
 				{
-					// TODO: Consider going after health pack
-					++iter;
+					AddItemToInventory(firstEmptyInventorySlot, healthPack.entityInfo, healthPack.itemInfo);
+					iter = foundHealthPacks.erase(iter);
 				}
 			}
 			else
 			{
+				// TODO: Consider going after health pack
 				++iter;
 			}
 		}
@@ -466,31 +458,23 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		while (iter != foundFood.end())
 		{
 			Food food = *iter;
-			int foodCount = InventoryItemCount(eItemType::FOOD);
-			if (foodCount < m_MaxItemInInventoryCount)
+			if (food.fresh)
 			{
-				if (food.fresh)
+				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
+				if (firstEmptyInventorySlot == -1)
 				{
-					int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
-					if (firstEmptyInventorySlot == -1)
-					{
-						// TODO: Consider dropping something to make room for this
-						++iter;
-					}
-					else
-					{
-						AddItemToInventory(firstEmptyInventorySlot, food.entityInfo, food.itemInfo);
-						iter = foundFood.erase(iter);
-					}
+					// TODO: Consider dropping something to make room for this
+					++iter;
 				}
 				else
 				{
-					// TODO: Consider going after food
-					++iter;
+					AddItemToInventory(firstEmptyInventorySlot, food.entityInfo, food.itemInfo);
+					iter = foundFood.erase(iter);
 				}
 			}
 			else
 			{
+				// TODO: Consider going after food
 				++iter;
 			}
 		}
@@ -510,14 +494,25 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	}
 
 
-	if (agentInfo.Stamina == 10.0f)
+	if (agentInfo.Stamina >= 9.9f)
 	{
 		agentInfo.RunMode = true;
 	}
-	else if (agentInfo.Stamina == 0.0f)
+	else if (agentInfo.Stamina <= 0.1f)
 	{
 		// Start regenerating stamina
 		agentInfo.RunMode = false;
+	}
+
+	if (b2Distance(m_NearestEnemy.Position, agentInfo.Position) < agentInfo.FOV_Range)
+	{
+		//DEBUG_LogMessage("flee weight: %.2f\n", m_FleeWeightNearEnemies);
+		m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNearEnemies);
+	}
+	else
+	{
+		//DEBUG_LogMessage("flee weight: %.2f\n", m_FleeWeightNotNearEnemies);
+		m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNotNearEnemies);
 	}
 
 	Blackboard* pBlackboard = m_pBehaviourTree->GetBlackboard();
@@ -564,6 +559,14 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		if (m_NextNavMeshGoal != m_SoftGoal)
 		{
 			DEBUG_DrawSolidCircle(m_NextNavMeshGoal.Position, 0.3f, { 0.0f, 0.0f }, { 0.0f, 0.5f, 0.5f });
+		}
+	}
+
+	for (size_t i = 0; i < m_KnownEnemies.size(); i++)
+	{
+		if (!m_KnownEnemies[i].InFieldOfView)
+		{
+			DEBUG_DrawCircle(m_KnownEnemies[i].PredictedPosition, 1.5f, { 1.0f, 0.1f, 0.1f , 0.1f });
 		}
 	}
 
@@ -912,20 +915,20 @@ void TestBoxPlugin::ConstructHouse(const HouseInfo& houseInfo, House& house)
 	house.secondsSinceLastVisit = m_SecondsBetweenHouseRevisits + 1.0f; // Flag so we know to go in here
 }
 
-int TestBoxPlugin::InventoryItemCount(eItemType itemType)
-{
-	int count = 0;
-
-	for (size_t i = 0; i < m_Inventory.size(); i++)
-	{
-		if (m_Inventory[i].itemInfo.Type == itemType)
-		{
-			++count;
-		}
-	}
-
-	return count;
-}
+//int TestBoxPlugin::InventoryItemCount(eItemType itemType)
+//{
+//	int count = 0;
+//
+//	for (size_t i = 0; i < m_Inventory.size(); i++)
+//	{
+//		if (m_Inventory[i].itemInfo.Type == itemType)
+//		{
+//			++count;
+//		}
+//	}
+//
+//	return count;
+//}
 
 int TestBoxPlugin::FirstEmptyInventorySlotID() const
 {

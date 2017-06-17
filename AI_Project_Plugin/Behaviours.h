@@ -145,6 +145,7 @@ inline bool KnowOfItemsOnGround(Blackboard* pBlackboard)
 
 inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 {
+	std::vector<Item>* inventory;
 	std::vector<EntityInfo>* knownItems = nullptr;
 	std::vector<HealthPack>* knownHealthPacks = nullptr;
 	std::vector<Food>* knownFoodItems = nullptr;
@@ -153,6 +154,7 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 	float maxHealth = 0;
 	float maxEnergy = 0;
 	bool dataAvailable =
+		pBlackboard->GetData("Inventory", inventory) &&
 		pBlackboard->GetData("KnownItems", knownItems) &&
 		pBlackboard->GetData("KnownHealthPacks", knownHealthPacks) &&
 		pBlackboard->GetData("KnownFoodItems", knownFoodItems) &&
@@ -217,6 +219,7 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 		}
 	}
 
+
 	// Prioritize HEALTH
 	if (nearestHealthPackIndex != -1)
 	{
@@ -271,7 +274,7 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 		return Success;
 	}
 
-	return Success;
+	return Failure;
 }
 
 inline bool KnownHouseNotRecentlyVisited(Blackboard* pBlackboard)
@@ -637,13 +640,13 @@ inline BehaviourState AimAtNearestEnemyInFOV(Blackboard* pBlackboard)
 		v2.Normalize();
 
 		const float dAngle = acos(b2Dot(v1, v2));
-		const float minAngle = 0.08f; // TODO: Find better way of figuring out if enemies are able to be shot
+		const float minAngle = 0.1f; // TODO: Find better way of figuring out if enemies are able to be shot
 
 		if (abs(dAngle) > minAngle)
 		{
 			float angularVel = std::copysign(pAgentInfo->MaxAngularSpeed, dAngle);
 			// Prevent turning too far
-			angularVel = dAngle > 0 ? std::min(dAngle, angularVel) : std::max(dAngle, angularVel);
+			//angularVel = dAngle > 0 ? std::min(dAngle, angularVel) : std::max(dAngle, angularVel);
 			pAgentInfo->AngularVelocity = angularVel;
 			printf("Aiming at nearest enemy\n");
 
@@ -663,7 +666,7 @@ inline BehaviourState AimAtNearestEnemyInFOV(Blackboard* pBlackboard)
 
 inline BehaviourState ShootPistol(Blackboard* pBlackboard)
 {
-	printf("Shooting pisolt!\n");
+	printf("Shooting pistol!\n");
 	pBlackboard->ChangeData("ShootPistol", true);
 
 	return Failure; // Keep executing other behaviours
@@ -748,32 +751,13 @@ inline BehaviourState SetSoftGoalOnOtherSideOfMap(Blackboard* pBlackboard)
 	if (!dataAvailable || !pAgentInfo)
 		return Failure;
 
-	// Divide world up into 9 parts, pick one other than the one we're in now to target
 	float worldWidth = worldMaxCoords.x - worldMinCoords.x;
 	float worldHeight = worldMaxCoords.y - worldMinCoords.y;
-	int chunkCount = 3; // *Must be odd*
-	float divWorldWidth = (worldWidth / chunkCount + 1.0f);
-	float divWorldHeight = (worldHeight / chunkCount + 1.0f);
-
-	int xChunk = (int)(pAgentInfo->Position.x / divWorldWidth) - 1;
-	int yChunk = (int)(pAgentInfo->Position.y / divWorldHeight) - 1;
-
-	xChunk = Clamp(xChunk, -chunkCount / 2, chunkCount / 2);
-	yChunk = Clamp(yChunk, -chunkCount / 2, chunkCount / 2);
-
-	// Move to another chunk 
-	if (xChunk == -1) xChunk = 0;
-	else if (xChunk == 0) xChunk = 1;
-	else if (xChunk == 1) xChunk = -1;
-
-	if (yChunk == -1) yChunk = 0;
-	else if (yChunk == 0) yChunk = 1;
-	else if (yChunk == 1) yChunk = -1;
 
 	SteeringParams newGoal = {};
-	// New pos is in center of chosen chunk
-	newGoal.Position = b2Vec2(xChunk * divWorldWidth + divWorldWidth / 2.0f, 
-							  yChunk * divWorldHeight + divWorldHeight / 2.0f);
+	newGoal.Position = pAgentInfo->Position + b2Vec2(
+		std::copysign(worldWidth / 4.0f, -pAgentInfo->Position.x),
+		std::copysign(worldHeight / 4.0f, -pAgentInfo->Position.y));
 
 	pBlackboard->ChangeData("SoftGoal", newGoal);
 	pBlackboard->ChangeData("SoftGoalSet", true);
@@ -795,12 +779,15 @@ inline BehaviourState SetSoftGoalOutsideHouse(Blackboard* pBlackboard)
 	if (!dataAvailable || !pAgentInfo)
 		return Failure;
 
+	float maxDist = 80.0f;
 	SteeringParams newGoal = {};
-	newGoal.Position = pAgentInfo->Position + b2Vec2(rand() % 50 - 25.0f, rand() % 50 - 25.0f);
+	newGoal.Position = pAgentInfo->Position + b2Vec2(
+		rand() % ((int)maxDist) - maxDist / 2.0f, 
+		rand() % ((int)maxDist) - maxDist / 2.0f);
 	newGoal.Position.x = Clamp(newGoal.Position.x, worldMinCoords.x, worldMaxCoords.x);
 	newGoal.Position.y = Clamp(newGoal.Position.y, worldMinCoords.y, worldMaxCoords.y);
 
-	printf("Soft goal set to outside house\n");
+	printf("Set soft goal set to outside house\n");
 	pBlackboard->ChangeData("SoftGoal", newGoal);
 	pBlackboard->ChangeData("SoftGoalSet", true);
 
