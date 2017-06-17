@@ -75,6 +75,12 @@ inline float GetOrientationFromVelocity(b2Vec2 velocity)
 	return atan2f(velocity.x, -velocity.y);
 }
 
+template<class T>
+inline T Clamp(T val, T min, T max)
+{
+	return std::max(min, std::min(val, max));
+}
+
 inline b2Vec2 Clamp(const b2Vec2& a, float max)
 {
 	auto scale = max / a.Length();

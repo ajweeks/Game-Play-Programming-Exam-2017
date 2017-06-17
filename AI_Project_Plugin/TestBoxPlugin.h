@@ -47,6 +47,10 @@ protected:
 	//b2Vec2 m_ClickGoal; // Used for debugging
 	SteeringParams m_Goal = {};
 	SteeringParams m_NextNavMeshGoal = {};
+	bool m_GoalSet = false;
+	SteeringParams m_SoftGoal = {}; // A general area to go to, if something interesting is spotted on the way here, look at it
+	bool m_SoftGoalSet = false;
+	SteeringParams m_NearestEnemy = {};
 	std::vector<SteeringBehaviours::ISteeringBehaviour*> m_BehaviourVec = {};
 
 	std::vector<Item> m_Inventory; // Store this ourselves because the engine yells at us when we ask if a certain slot is full
@@ -54,7 +58,7 @@ protected:
 	int m_MaxPistolInInventoryCount = 2;
 	int m_MaxItemInInventoryCount = 3; // Max number of any particular item in inventory
 
-	float m_SecondsBetweenHouseRevisits = 45.0f; // How long to wait until visiting a house again
+	float m_SecondsBetweenHouseRevisits = 90.0f; // How long to wait until visiting a house again
 
 	int m_InHouseIndex = -1; // -1 when not in any house
 

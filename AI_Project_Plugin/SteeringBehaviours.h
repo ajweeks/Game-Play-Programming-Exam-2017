@@ -135,9 +135,6 @@ namespace SteeringBehaviours
 		float m_TargetRadius = 2.0f;
 	};
 
-	//ALIGN
-	//*****
-
 	//AVOID-OBSTACLE
 	struct Obstacle
 	{
@@ -148,7 +145,7 @@ namespace SteeringBehaviours
 	class AvoidObstacle : public ISteeringBehaviour
 	{
 	public:
-		AvoidObstacle(std::vector<Obstacle> obstacles) :m_Obstacles(obstacles) {};
+		AvoidObstacle(std::vector<Obstacle> obstacles) : m_Obstacles(obstacles) {};
 		virtual ~AvoidObstacle() {};
 
 		//AvoidObstacle Behaviour

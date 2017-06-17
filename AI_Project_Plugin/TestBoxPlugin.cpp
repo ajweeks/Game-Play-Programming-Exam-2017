@@ -5,8 +5,10 @@
 #include "BehaviourTree.h"
 #include "SteeringBehaviours.h"
 #include "Behaviours.h"
+#include "CombinedSB.h"
 
-TestBoxPlugin::TestBoxPlugin():IBehaviourPlugin(GameDebugParams(20, true, false, false, false, 2.0f))
+TestBoxPlugin::TestBoxPlugin():
+	IBehaviourPlugin(GameDebugParams(20, true, false, false, false, 2.0f))
 {
 }
 
@@ -31,6 +33,10 @@ void TestBoxPlugin::Start()
 	}
 
 	AgentInfo agentInfo = AGENT_GetInfo(); //Contains all Agent Parameters, retrieved by copy!
+	WorldInfo worldInfo = WORLD_GetInfo(); //Contains the location of the center of the world and the dimensions
+
+	const b2Vec2 minWorldCoords = worldInfo.Center - worldInfo.Dimensions / 2.0f;
+	const b2Vec2 maxWorldCoords = worldInfo.Center + worldInfo.Dimensions / 2.0f;
 
 	//Create behaviours
 	auto pSeekBehaviour = new SteeringBehaviours::Seek();
@@ -39,39 +45,48 @@ void TestBoxPlugin::Start()
 	auto pWanderBehaviour = new SteeringBehaviours::Wander();
 	m_BehaviourVec.push_back(pWanderBehaviour);
 	auto pFleeBehaviour = new SteeringBehaviours::Flee();
+	pFleeBehaviour->SetTarget(&m_NearestEnemy);
 	m_BehaviourVec.push_back(pFleeBehaviour);
+	//auto pSeekOtherSideOfMapBehaviour = new SteeringBehaviours::Seek();
+	//pSeekOtherSideOfMapBehaviour->SetTarget(&m_OtherSideOfMapGoal);
+	//m_BehaviourVec.push_back(pSeekOtherSideOfMapBehaviour);
 
-	m_CurrentSteeringBehaviour = pWanderBehaviour;
+	// Search outside behaviour
+	std::vector<CombinedSB::BehaviourAndWeight> searchOutsideHouseBehavioursAndWeights;
+	searchOutsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.1f));
+	searchOutsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 1.0f));
+	searchOutsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, 0.2f));
+	CombinedSB::BlendedSteering* pOutsideHouseSteeringBehaviour = new CombinedSB::BlendedSteering(searchOutsideHouseBehavioursAndWeights);
+	m_BehaviourVec.push_back(pOutsideHouseSteeringBehaviour);
 
-	//m_pSeparationBehaviour = new Separation(this);
-	//m_pSeparationBehaviour->SetNeighbourhoodRadius(8.0f);
-	//m_pSeparationBehaviour->SetNeighbourhoodMinDP(-1.0f);
-	//
-	//m_pCohesionBehaviour = new Cohesion(this);
-	//m_pCohesionBehaviour->SetNeighbourhoodRadius(30.0f);
-	//m_pCohesionBehaviour->SetNeighbourhoodMinDP(0.0f);
-	//
-	//m_pVelMatchBehaviour = new VelocityMatch(this);
-	//m_pVelMatchBehaviour->SetNeighbourhoodRadius(15.0f);
-	//m_pVelMatchBehaviour->SetNeighbourhoodMinDP(0.0f);
-	//
-	//
-	//m_pBlendedSteering = new CombinedSB::BlendedSteering(
-	//{
-	//	{ m_pSeparationBehaviour, 1.0f },
-	//	{ m_pCohesionBehaviour, 1.0f },
-	//	{ m_pVelMatchBehaviour, 2.0f }
-	//});
+	// Search inside behaviour
+	//std::vector<CombinedSB::BehaviourAndWeight> searchInsideHouseBehavioursAndWeights;
+	//searchInsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.2f));
+	//searchInsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 0.5f));
+	//searchInsideHouseBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, 0.5f));
+	//// TODO: Move away from edges of building behaviour?
+	//CombinedSB::BlendedSteering* pInsideHouseSteeringBehaviour = new CombinedSB::BlendedSteering(searchInsideHouseBehavioursAndWeights);
+	//m_BehaviourVec.push_back(pInsideHouseSteeringBehaviour);
 
+	// Seek item
+	//std::vector<CombinedSB::BehaviourAndWeight> seekItemBehavioursAndWeights;
+	//seekItemBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 1.0f));
+	//seekItemBehavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, 0.2f));
+	//CombinedSB::BlendedSteering* pSeekItemSteeringBehaviour = new CombinedSB::BlendedSteering(seekItemBehavioursAndWeights);
+	//m_BehaviourVec.push_back(pSeekItemSteeringBehaviour);
+
+	m_CurrentSteeringBehaviour = pOutsideHouseSteeringBehaviour;
+	
 	//Create blackboard
 	auto pBlackboard = new Blackboard;
 	pBlackboard->AddData("AgentInfo", &agentInfo);
 	pBlackboard->AddData("Goal", m_Goal);
 	pBlackboard->AddData("NextNavMeshGoal", m_NextNavMeshGoal);
-	pBlackboard->AddData("GoalSet", false);
-	pBlackboard->AddData("SeekBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pSeekBehaviour));
-	pBlackboard->AddData("WanderBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pWanderBehaviour));
-	pBlackboard->AddData("FleeBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pFleeBehaviour));
+	pBlackboard->AddData("GoalSet", m_GoalSet);
+	pBlackboard->AddData("SoftGoal", m_SoftGoal);
+	pBlackboard->AddData("SoftGoalSet", m_SoftGoalSet);
+	//pBlackboard->AddData("OutsideBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pOutsideHouseSteeringBehaviour));
+	//pBlackboard->AddData("SeekItemBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pSeekItemSteeringBehaviour));
 	pBlackboard->AddData("CurrentBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(m_CurrentSteeringBehaviour));
 	pBlackboard->AddData("Inventory", &m_Inventory);
 	pBlackboard->AddData("MaxHealth", agentInfo.Health);
@@ -86,8 +101,11 @@ void TestBoxPlugin::Start()
 	pBlackboard->AddData("KnownHouses", &m_KnownHouses);
 	pBlackboard->AddData("SecondsBetweenHouseRevisits", m_SecondsBetweenHouseRevisits);
 	pBlackboard->AddData("InsideHouse", false);
+	pBlackboard->AddData("WorldMinCoords", minWorldCoords);
+	pBlackboard->AddData("WorldMaxCoords", maxWorldCoords);
+	pBlackboard->AddData("NearestEnemyPosition", &m_NearestEnemy);
 
-	// Flags behaviours can set to send info back to this class
+	// Flags that behaviours can set to send info back to this class
 	pBlackboard->AddData("ShootPistol", false);
 	pBlackboard->AddData("UseHealthItem", false);
 	pBlackboard->AddData("UseFoodItem", false);
@@ -95,52 +113,79 @@ void TestBoxPlugin::Start()
 	m_pBehaviourTree = new BehaviourTree(pBlackboard,
 	new BehaviourSelector
 	({
-		new BehaviourSelector // Health
+		new BehaviourSequence // Seek GOAL
 		({
-			new BehaviourSequence
-			({
-				new BehaviourConditional(LowHealth),
-				new BehaviourConditional(HasHealthItem),
-				new BehaviourAction(UseHealthItem)
-			}),
-			new BehaviourSequence // Search for resources
-			({
-				new BehaviourConditional(LowHealth),
-				new BehaviourConditional(KnowLocationOfHealthPacks),
-				new BehaviourAction(SetClosestKnownHealthPackAsTarget),
-				new BehaviourAction(ChangeToSeek),
-			})
+			new BehaviourConditional(IsGoalSet),
+			new BehaviourConditional(HasReachedGoal),
+			new BehaviourAction(SetGoalSetFalse)
 		}),
-		new BehaviourSequence // Check energy
+		new BehaviourSequence // Seek SOFT GOAL
 		({
-			// TODO: Copy health technique of a selector
+			new BehaviourConditional(IsSoftGoalSet),
+			new BehaviourConditional(HasReachedSoftGoal),
+			new BehaviourAction(SetSoftGoalSetFalse)
+		}),
+		new BehaviourConditional(IsGoalSet), // Don't go any further if a goal is set
+		new BehaviourSequence // Flee from ENEMIES
+		({
+			new BehaviourConditional(HasEnemyInFOV), // TODO: Use estimated enemy positions
+			new BehaviourAction(FleeFromNearestEnemy)
+		}),
+		new BehaviourSequence // Use HEALTH
+		({
+			new BehaviourConditional(LowHealth),
+			new BehaviourConditional(HasHealthItem),
+			new BehaviourAction(UseHealthItem)
+		}),
+		new BehaviourSequence // Use FOOD
+		({
 			new BehaviourConditional(LowEnergy),
 			new BehaviourConditional(HasFoodItem),
 			new BehaviourAction(UseFoodItem)
 		}),
-		new BehaviourSequence // Try to shoot enemies
-		({
-			new BehaviourConditional(HasLoadedPistol),
-			new BehaviourConditional(HasEnemyInFOV),
-			new BehaviourConditional(HasEnemyInRange),
-			new BehaviourAction(AimAtNearestEnemyInFOV),
-			new BehaviourAction(ShootPistol)
-		}),
-		new BehaviourSequence // Go to items we have seen but not picked up
+		//new BehaviourSequence // Shoot ENEMIES	
+		//({
+		//	new BehaviourConditional(HasLoadedPistol),
+		//	new BehaviourConditional(HasEnemyInRange),
+		//	new BehaviourConditional(HasEnemyInFOV),
+		//	new BehaviourAction(AimAtNearestEnemyInFOV),
+		//	new BehaviourAction(ShootPistol)
+		//}),
+		//new BehaviourSequence // Search current HOUSE
+		//({
+		//	new BehaviourConditional(CurrentlyInsideHouse),
+		//	new BehaviourAction(ChangeToInsideSteeringBehaviour)
+		//}),
+		new BehaviourSequence // Pick up ITEMS
 		({
 			new BehaviourConditional(HaveInventorySpace),
 			new BehaviourConditional(KnowOfItemsOnGround),
-			new BehaviourAction(SetNearestItemAsTarget),
-			new BehaviourAction(ChangeToSeek)
+			new BehaviourAction(SetNearestItemAsGoal),
+			new BehaviourAction(SetSoftGoalSetFalse)
+			//new BehaviourAction(ChangeToSeekTargetSteeringBehaviour)
 		}),
-		new BehaviourSequence // Search known houses if not in a house already
+		new BehaviourSequence // Pick up ITEMS
 		({
-			new BehaviourConditionalInverse(CurrentlyInsideHouse),
-			new BehaviourConditional(KnownHouseNotRecentlyVisited),
-			new BehaviourAction(SetTargetToClosestHouseNotRecentlyVisited),
-			new BehaviourAction(ChangeToSeek)
+			new BehaviourConditional(CurrentlyInsideHouse),
+			new BehaviourConditionalInverse(KnowOfItemsOnGround),
+			new BehaviourConditionalInverse(IsSoftGoalSet),
+			new BehaviourAction(SetSoftGoalOutsideHouse),
+			//new BehaviourAction(ChangeToOutsideSteeringBehaviour)
 		}),
-		new BehaviourAction(ChangeToWander) // Look for things randomly
+		new BehaviourSequence // Search HOUSES
+		({
+			//new BehaviourConditionalInverse(CurrentlyInsideHouse), // Not needed?
+			new BehaviourConditional(KnownHouseNotRecentlyVisited),
+			new BehaviourAction(SetGoalToClosestHouseNotRecentlyVisited),
+			new BehaviourAction(SetSoftGoalSetFalse)
+			//new BehaviourAction(ChangeToSeekTargetSteeringBehaviour)
+		}),
+		new BehaviourSequence // Search HOUSES
+		({
+			new BehaviourConditionalInverse(IsSoftGoalSet),
+			new BehaviourAction(SetSoftGoalOnOtherSideOfMap),
+			//new BehaviourAction(ChangeToOutsideSteeringBehaviour)
+		})
 	}));
 
 	m_StartingHealth = agentInfo.Health;
@@ -179,7 +224,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		case eEntityType::ITEM:
 		{
 			bool addedToList = false; // If this isn't set to true, this item is added to our list of unknown items
-			if (b2Distance(entityInfo.Position, agentInfo.Position) < agentInfo.GrabRange)
+			if (b2Distance(entityInfo.Position, agentInfo.Position) < (agentInfo.GrabRange * 0.75f)) // Use smaller grab range because sometimes it doesn't think you're in it
 			{
 				ItemInfo itemInfo = {};
 				ITEM_Grab(entityInfo, itemInfo);
@@ -475,13 +520,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		agentInfo.RunMode = false;
 	}
 
-	DEBUG_DrawCircle(agentInfo.Position, agentInfo.GrabRange, { 0, 0, 1 });
-	DEBUG_DrawSolidCircle(m_Goal.Position, 0.4f, { 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
-	if (m_NextNavMeshGoal != m_Goal)
-	{
-		DEBUG_DrawSolidCircle(m_NextNavMeshGoal.Position, 0.3f, { 0.0f, 0.0f }, { 0.0f, 0.5f, 0.5f });
-	}
-
 	Blackboard* pBlackboard = m_pBehaviourTree->GetBlackboard();
 	pBlackboard->ChangeData("AgentInfo", &agentInfo);
 	pBlackboard->ChangeData("Inventory", &m_Inventory);
@@ -498,11 +536,35 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 	bool goalSet;
 	pBlackboard->GetData("GoalSet", goalSet);
-	pBlackboard->GetData("Goal", m_Goal);
+
+	bool softGoalSet;
+	pBlackboard->GetData("SoftGoalSet", softGoalSet);
+
 	if (goalSet)
 	{
+		pBlackboard->GetData("Goal", m_Goal);
 		m_NextNavMeshGoal = NAVMESH_GetClosestPathPoint(m_Goal.Position);
 		pBlackboard->ChangeData("NextNavMeshGoal", m_NextNavMeshGoal);
+
+		DEBUG_DrawCircle(agentInfo.Position, agentInfo.GrabRange, { 0, 0, 1 });
+		DEBUG_DrawSolidCircle(m_Goal.Position, 0.4f, { 0.0f, 0.0f }, { 1.0f, 0.0f, 0.0f });
+		if (m_NextNavMeshGoal != m_Goal)
+		{
+			DEBUG_DrawSolidCircle(m_NextNavMeshGoal.Position, 0.3f, { 0.0f, 0.0f }, { 0.0f, 0.5f, 0.5f });
+		}
+	}
+	else if (softGoalSet)
+	{
+		pBlackboard->GetData("SoftGoal", m_SoftGoal);
+		m_NextNavMeshGoal = NAVMESH_GetClosestPathPoint(m_SoftGoal.Position);
+		pBlackboard->ChangeData("NextNavMeshGoal", m_NextNavMeshGoal);
+
+		DEBUG_DrawCircle(agentInfo.Position, agentInfo.GrabRange, { 0, 0, 1 });
+		DEBUG_DrawSolidCircle(m_SoftGoal.Position, 0.4f, { 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f });
+		if (m_NextNavMeshGoal != m_SoftGoal)
+		{
+			DEBUG_DrawSolidCircle(m_NextNavMeshGoal.Position, 0.3f, { 0.0f, 0.0f }, { 0.0f, 0.5f, 0.5f });
+		}
 	}
 
 	pBlackboard->GetData("CurrentBehaviour", m_CurrentSteeringBehaviour);
