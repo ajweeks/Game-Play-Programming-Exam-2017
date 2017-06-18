@@ -92,9 +92,10 @@ inline BehaviourState SetGoalToNextSearchPoint(Blackboard* pBlackboard)
 		printf("Set goal back to search point index: %i/%i\n", searchPointIndex, searchPoints->size());
 		pBlackboard->ChangeData("Goal", goal);
 		pBlackboard->ChangeData("GoalSet", true);
+		return Success;
 	}
 
-	return Success;
+	return Failure;
 }
 
 inline BehaviourState IncrementSearchPoint(Blackboard* pBlackboard)
@@ -118,9 +119,10 @@ inline BehaviourState IncrementSearchPoint(Blackboard* pBlackboard)
 		goal.Position = searchPoints->at(newSearchPointIndex);
 		pBlackboard->ChangeData("Goal", goal);
 		pBlackboard->ChangeData("GoalSet", true);
+		return Success;
 	}
 
-	return Success;
+	return Failure;
 }
 
 inline bool IsGoalSet(Blackboard* pBlackboard)
@@ -156,39 +158,6 @@ inline BehaviourState SetGoalSetFalse(Blackboard* pBlackboard)
 	return Failure; // Continue doing other behaviours
 }
 
-//inline bool IsSoftGoalSet(Blackboard* pBlackboard)
-//{
-//	bool softGoalSet;
-//	bool dataAvailable = pBlackboard->GetData("SoftGoalSet", softGoalSet);
-//
-//	if (!dataAvailable)
-//		return false;
-//
-//	return softGoalSet;
-//}
-//
-//inline bool HasReachedSoftGoal(Blackboard* pBlackboard)
-//{
-//	SteeringParams softGoal;
-//	AgentInfo* pAgentInfo = nullptr;
-//	bool dataAvailable =
-//		pBlackboard->GetData("SoftGoal", softGoal) &&
-//		pBlackboard->GetData("AgentInfo", pAgentInfo);
-//
-//	if (!dataAvailable || !pAgentInfo)
-//		return false;
-//
-//	float dist = b2Distance(softGoal.Position, pAgentInfo->Position);
-//
-//	return dist <= pAgentInfo->GrabRange;
-//}
-//
-//inline BehaviourState SetSoftGoalSetFalse(Blackboard* pBlackboard)
-//{
-//	pBlackboard->ChangeData("SoftGoalSet", false);
-//	return Success;
-//}
-
 inline bool HaveInventorySpace(Blackboard* pBlackboard)
 {
 	std::vector<Item>* inventory = nullptr;
@@ -200,7 +169,7 @@ inline bool HaveInventorySpace(Blackboard* pBlackboard)
 
 	for (size_t i = 0; i < inventory->size(); i++)
 	{
-		if (!inventory->at(i).valid)
+		if (!inventory->at(i).Valid)
 		{
 			return true;
 		}
@@ -309,26 +278,7 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 		}
 	}
 
-
-	// Prioritize HEALTH
-	if (nearestHealthPackIndex != -1)
-	{
-		HealthPack nearestHealthPack = knownHealthPacks->at(nearestHealthPackIndex);
-		if (neededHealth >= nearestHealthPack.HealingAmount || 
-			(nearestFoodItemIndex == -1 && nearestPistolIndex == -1))
-		{
-			SteeringParams goal = {};
-			goal.Position = nearestHealthPack.Position;
-			if (previousGoal.Position != goal.Position)
-			{
-				printf("Set goal of health\n");
-				pBlackboard->ChangeData("Goal", goal);
-				pBlackboard->ChangeData("GoalSet", true);
-			}
-			return Success;
-		}
-	}
-	// Then FOOD
+	// Prioritize FOOD
 	if (nearestFoodItemIndex != -1)
 	{
 		Food nearestFoodItem = knownFoodItems->at(nearestFoodItemIndex);
@@ -346,6 +296,25 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 			return Success;
 		}
 	}
+	// Then HEALTH
+	if (nearestHealthPackIndex != -1)
+	{
+		HealthPack nearestHealthPack = knownHealthPacks->at(nearestHealthPackIndex);
+		if (neededHealth >= nearestHealthPack.HealingAmount || 
+			(nearestFoodItemIndex == -1 && nearestPistolIndex == -1))
+		{
+			SteeringParams goal = {};
+			goal.Position = nearestHealthPack.Position;
+			if (previousGoal.Position != goal.Position)
+			{
+				printf("Set goal of health\n");
+				pBlackboard->ChangeData("Goal", goal);
+				pBlackboard->ChangeData("GoalSet", true);
+			}
+			return Success;
+		}
+	}
+
 	// Then PISTOLS
 	if (nearestPistolIndex != -1)
 	{
@@ -395,17 +364,18 @@ inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
 		return Failure;
 
 	int closestHouseIndex = -1;
-	float closestHouseDist = FLT_MAX;
-	for (size_t i = 0; i < pKnownHouses->size(); i++)
+	float closestHouseDistSqr = FLT_MAX;
+	size_t numKnownHouses = pKnownHouses->size();
+	for (size_t i = 0; i < numKnownHouses; i++)
 	{
 		House house = pKnownHouses->at(i);
 
-		if (house.secondsSinceLastVisit > secondsBetweenVisits)
+		if (house.SecondsSinceLastVisit > secondsBetweenVisits)
 		{
-			float dist = b2Distance(house.info.Center, pAgentInfo->Position);
-			if (dist < closestHouseDist)
+			float distSqr = b2DistanceSquared(house.Info.Center, pAgentInfo->Position);
+			if (distSqr < closestHouseDistSqr)
 			{
-				closestHouseDist = dist;
+				closestHouseDistSqr = distSqr;
 				closestHouseIndex = i;
 			}
 		}
@@ -421,7 +391,7 @@ inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
 	if (closestHouseIndex != -1)
 	{
 		SteeringParams goal;
-		goal.Position = pKnownHouses->at(closestHouseIndex).info.Center;
+		goal.Position = pKnownHouses->at(closestHouseIndex).Info.Center;
 		if (goal.Position != previousGoal.Position)
 		{
 			printf("Set goal of nearest house!\n");
@@ -433,6 +403,74 @@ inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
 
 
 	return Failure;
+}
+
+inline BehaviourState SetGoalToNearestUnexploredHouse(Blackboard* pBlackboard)
+{
+	SteeringParams previousGoal;
+	AgentInfo* pAgentInfo = nullptr;
+	std::vector<House>* pKnownHouses = nullptr;
+	bool dataAvailable =
+		pBlackboard->GetData("Goal", previousGoal) &&
+		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
+		pBlackboard->GetData("KnownHouses", pKnownHouses);
+
+	if (!dataAvailable || !pAgentInfo || !pKnownHouses)
+		return Failure;
+
+	int closestHouseIndex = -1;
+	float closestHouseDistSqr = FLT_MAX;
+	size_t numKnownHouses = pKnownHouses->size();
+	for (size_t i = 0; i < numKnownHouses; i++)
+	{
+		House house = pKnownHouses->at(i);
+
+		if (house.Unexplored)
+		{
+			float distSqr = b2DistanceSquared(house.Info.Center, pAgentInfo->Position);
+			if (distSqr < closestHouseDistSqr)
+			{
+				closestHouseDistSqr = distSqr;
+				closestHouseIndex = i;
+			}
+		}
+	}
+
+	if (closestHouseIndex != -1)
+	{
+		SteeringParams goal;
+		goal.Position = pKnownHouses->at(closestHouseIndex).Info.Center;
+		if (goal.Position != previousGoal.Position)
+		{
+			printf("Set goal of nearest unexplored house!\n");
+			pBlackboard->ChangeData("Goal", goal);
+			pBlackboard->ChangeData("GoalSet", true);
+		}
+		return Success;
+	}
+
+	return Failure;
+}
+
+inline bool KnowOfUnexploredHouse(Blackboard* pBlackboard)
+{
+	std::vector<House>* knownHouses = nullptr;
+	float maxHealth = 0;
+	bool dataAvailable =
+		pBlackboard->GetData("KnownHouses", knownHouses);
+
+	if (!dataAvailable || knownHouses->empty())
+		return false;
+
+	for (size_t i = 0; i < knownHouses->size(); i++)
+	{
+		if (knownHouses->at(i).Unexplored)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 inline bool KnownHouseNotRecentlyVisited(Blackboard* pBlackboard)
@@ -449,7 +487,7 @@ inline bool KnownHouseNotRecentlyVisited(Blackboard* pBlackboard)
 
 	for (size_t i = 0; i < knownHouses->size(); i++)
 	{
-		if (knownHouses->at(i).secondsSinceLastVisit >= secondsBetweenRevisits)
+		if (knownHouses->at(i).SecondsSinceLastVisit >= secondsBetweenRevisits)
 		{
 			return true;
 		}
@@ -485,7 +523,7 @@ inline BehaviourState SetGoalToClosestHouseNotRecentlyVisited(Blackboard* pBlack
 	int closestHouseIndex = -1;
 	for (size_t i = 0; i < knownHouses->size(); i++)
 	{
-		if (knownHouses->at(i).secondsSinceLastVisit >= secondsBetweenRevisits)
+		if (knownHouses->at(i).SecondsSinceLastVisit >= secondsBetweenRevisits)
 		{
 			closestHouse = knownHouses->at(i);
 			closestHouseIndex = i;
@@ -496,7 +534,7 @@ inline BehaviourState SetGoalToClosestHouseNotRecentlyVisited(Blackboard* pBlack
 	{
 		printf("Set goal of house\n");
 		SteeringParams goal = {};
-		goal.Position = closestHouse.info.Center;
+		goal.Position = closestHouse.Info.Center;
 		pBlackboard->ChangeData("Goal", goal);
 		pBlackboard->ChangeData("GoalSet", true);
 		return Success;
@@ -529,7 +567,7 @@ inline BehaviourState SetGoalToNextHouse(Blackboard* pBlackboard)
 
 	printf("Set goal of next house, index %i/%i\n", newNextHouseIndex, knownHouses->size());
 	SteeringParams goal;
-	goal.Position = knownHouses->at(newNextHouseIndex).info.Center;
+	goal.Position = knownHouses->at(newNextHouseIndex).Info.Center;
 	pBlackboard->ChangeData("Goal", goal);
 	pBlackboard->ChangeData("GoalSet", true);
 
@@ -636,7 +674,7 @@ inline bool HasHealthItem(Blackboard* pBlackboard)
 
 	for (size_t i = 0; i < inventory->size(); i++)
 	{
-		if (inventory->at(i).valid && inventory->at(i).itemInfo.Type == eItemType::HEALTH)
+		if (inventory->at(i).Valid && inventory->at(i).ItemInfo.Type == eItemType::HEALTH)
 		{
 			return true;
 		}
@@ -709,7 +747,7 @@ inline bool HasFoodItem(Blackboard* pBlackboard)
 
 	for (size_t i = 0; i < inventory->size(); i++)
 	{
-		if (inventory->at(i).valid && inventory->at(i).itemInfo.Type == eItemType::FOOD)
+		if (inventory->at(i).Valid && inventory->at(i).ItemInfo.Type == eItemType::FOOD)
 		{
 			return true;
 		}
@@ -795,8 +833,8 @@ inline bool HasLoadedPistol(Blackboard* pBlackboard)
 
 	for (size_t i = 0; i < inventory->size(); i++)
 	{
-		if (inventory->at(i).valid && 
-			inventory->at(i).itemInfo.Type == eItemType::PISTOL)
+		if (inventory->at(i).Valid && 
+			inventory->at(i).ItemInfo.Type == eItemType::PISTOL)
 		{
 			return true;
 		}
@@ -870,7 +908,7 @@ inline BehaviourState AimAtNearestEnemyInFOV(Blackboard* pBlackboard)
 	{
 		printf("Aiming at nearest enemy! (enemy hash %i)\n", nearestEnemy.enemyInfo.EnemyHash);
 		pBlackboard->ChangeData("TargetEnemy", nearestEnemy);
-		return Success;
+		return Failure;
 	}
 
 	return Failure;
@@ -881,146 +919,4 @@ inline BehaviourState AimAtNearestEnemyInFOV(Blackboard* pBlackboard)
 //	pBlackboard->ChangeData("ShootPistol", true);
 //
 //	return Failure; // Keep executing other behaviours
-//}
-
-//// TODO: Use average of enemy positions in area
-//inline BehaviourState FleeFromNearestEnemy(Blackboard* pBlackboard)
-//{
-//	std::vector<Enemy>* knownEnemies = nullptr;
-//	AgentInfo* pAgentInfo = nullptr;
-//	SteeringParams* average;
-//	bool dataAvailable =
-//		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
-//		pBlackboard->GetData("KnownEnemies", knownEnemies) &&
-//		pBlackboard->GetData("AverageNearbyEnemyPostion", pNearestEnemy);
-//
-//	if (!dataAvailable || !pAgentInfo)
-//		return Failure;
-//
-//	float dist;
-//	Enemy nearestEnemy;
-//	if (NearestEnemyInFOV(knownEnemies, pAgentInfo, nearestEnemy, dist))
-//	{
-//		printf("Updating nearest enemy pos\n");
-//		pNearestEnemy->Position = nearestEnemy.Position;
-//		return Failure;
-//	}
-//
-//	return Failure;
-//}
-
-//inline BehaviourState ChangeToSeekTargetSteeringBehaviour(Blackboard* pBlackboard)
-//{
-//	SteeringBehaviours::ISteeringBehaviour* pOutsideBehaviour = nullptr;
-//	SteeringBehaviours::ISteeringBehaviour* pCurrentBehaviour = nullptr;
-//	bool dataAvailable =
-//		pBlackboard->GetData("OutsideBehaviour", pOutsideBehaviour) &&
-//		pBlackboard->GetData("CurrentBehaviour", pCurrentBehaviour);
-//
-//	if (!dataAvailable || !pOutsideBehaviour)
-//		return Failure;
-//
-//	if (pCurrentBehaviour != pOutsideBehaviour)
-//	{
-//		printf("Switching to seek target behaviour\n");
-//		pBlackboard->ChangeData("CurrentBehaviour", pOutsideBehaviour);
-//	}
-//
-//	return Success;
-//}
-//
-//inline BehaviourState ChangeToOutsideSteeringBehaviour(Blackboard* pBlackboard)
-//{
-//	SteeringBehaviours::ISteeringBehaviour* pOutsideBehaviour = nullptr;
-//	SteeringBehaviours::ISteeringBehaviour* pCurrentBehaviour = nullptr;
-//	bool dataAvailable =
-//		pBlackboard->GetData("OutsideBehaviour", pOutsideBehaviour) &&
-//		pBlackboard->GetData("CurrentBehaviour", pCurrentBehaviour);
-//
-//	if (!dataAvailable || !pOutsideBehaviour)
-//		return Failure;
-//
-//	if (pCurrentBehaviour != pOutsideBehaviour)
-//	{
-//		printf("Switching to outside behaviour\n");
-//		pBlackboard->ChangeData("CurrentBehaviour", pOutsideBehaviour);
-//	}
-//
-//	return Success;
-//}
-
-//inline BehaviourState SetSoftGoalOnOtherSideOfMap(Blackboard* pBlackboard)
-//{
-//	AgentInfo* pAgentInfo = nullptr;
-//	b2Vec2 worldMinCoords;
-//	b2Vec2 worldMaxCoords;
-//	bool dataAvailable =
-//		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
-//		pBlackboard->GetData("WorldMinCoords", worldMinCoords) &&
-//		pBlackboard->GetData("WorldMaxCoords", worldMaxCoords);
-//
-//	if (!dataAvailable || !pAgentInfo)
-//		return Failure;
-//
-//	float worldWidth = worldMaxCoords.x - worldMinCoords.x;
-//	float worldHeight = worldMaxCoords.y - worldMinCoords.y;
-//
-//	SteeringParams newGoal = {};
-//	newGoal.Position = pAgentInfo->Position + b2Vec2(
-//		std::copysign(worldWidth / 4.0f, -pAgentInfo->Position.x),
-//		std::copysign(worldHeight / 4.0f, -pAgentInfo->Position.y));
-//
-//	pBlackboard->ChangeData("SoftGoal", newGoal);
-//	pBlackboard->ChangeData("SoftGoalSet", true);
-//	printf("Set soft goal of other side of map\n");
-//
-//	return Success;
-//}
-//
-//inline BehaviourState SetSoftGoalOutsideHouse(Blackboard* pBlackboard)
-//{
-//	AgentInfo* pAgentInfo = nullptr;
-//	b2Vec2 worldMinCoords;
-//	b2Vec2 worldMaxCoords;
-//	bool dataAvailable =
-//		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
-//		pBlackboard->GetData("WorldMinCoords", worldMinCoords) &&
-//		pBlackboard->GetData("WorldMaxCoords", worldMaxCoords);
-//
-//	if (!dataAvailable || !pAgentInfo)
-//		return Failure;
-//
-//	float maxDist = 80.0f;
-//	SteeringParams newGoal = {};
-//	newGoal.Position = pAgentInfo->Position + b2Vec2(
-//		rand() % ((int)maxDist) - maxDist / 2.0f, 
-//		rand() % ((int)maxDist) - maxDist / 2.0f);
-//	newGoal.Position.x = Clamp(newGoal.Position.x, worldMinCoords.x, worldMaxCoords.x);
-//	newGoal.Position.y = Clamp(newGoal.Position.y, worldMinCoords.y, worldMaxCoords.y);
-//
-//	printf("Set soft goal set to outside house\n");
-//	pBlackboard->ChangeData("SoftGoal", newGoal);
-//	pBlackboard->ChangeData("SoftGoalSet", true);
-//
-//	return Success;
-//}
-
-//inline BehaviourState ChangeToInsideSteeringBehaviour(Blackboard* pBlackboard)
-//{
-//	SteeringBehaviours::ISteeringBehaviour* pInsideBehaviour = nullptr;
-//	SteeringBehaviours::ISteeringBehaviour* pCurrentBehaviour = nullptr;
-//	bool dataAvailable =
-//		pBlackboard->GetData("InsideBehaviour", pInsideBehaviour) &&
-//		pBlackboard->GetData("CurrentBehaviour", pCurrentBehaviour);
-//
-//	if (!dataAvailable || !pInsideBehaviour)
-//		return Failure;
-//
-//	if (pCurrentBehaviour != pInsideBehaviour)
-//	{
-//		printf("Switching to inside steering behaviour\n");
-//		pBlackboard->ChangeData("CurrentBehaviour", pInsideBehaviour);
-//	}
-//
-//	return Success;
 //}

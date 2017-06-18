@@ -14,8 +14,8 @@ bool operator==(const Enemy& lhs, const Enemy& rhs)
 
 bool operator==(const Item& lhs, const Item& rhs)
 {
-	return	lhs.itemInfo.Type == rhs.itemInfo.Type && 
-			lhs.itemInfo.ItemHash == rhs.itemInfo.ItemHash;
+	return	lhs.ItemInfo.Type == rhs.ItemInfo.Type && 
+			lhs.ItemInfo.ItemHash == rhs.ItemInfo.ItemHash;
 }
 
 bool operator==(const Pistol& lhs, const Pistol& rhs)
@@ -37,8 +37,8 @@ bool operator==(const Food& lhs, const Food& rhs)
 
 bool operator==(const House& lhs, const House& rhs)
 {
-	return	lhs.info.Center == rhs.info.Center &&
-			lhs.info.Size == rhs.info.Size;
+	return	lhs.Info.Center == rhs.Info.Center &&
+			lhs.Info.Size == rhs.Info.Size;
 }
 
 float Pistol::GetValue()

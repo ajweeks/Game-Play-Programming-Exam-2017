@@ -28,8 +28,8 @@ void TestBoxPlugin::Start()
 	m_Inventory.resize(INVENTORY_GetCapacity());
 	for (size_t i = 0; i < m_Inventory.size(); i++)
 	{
-		m_Inventory[i].itemInfo = {};
-		m_Inventory[i].valid = false;
+		m_Inventory[i].ItemInfo = {};
+		m_Inventory[i].Valid = false;
 	}
 
 	AgentInfo agentInfo = AGENT_GetInfo(); //Contains all Agent Parameters, retrieved by copy!
@@ -136,17 +136,23 @@ void TestBoxPlugin::Start()
 			new BehaviourConditional(HasReachedGoal),
 			new BehaviourAction(SetGoalSetFalse)
 		}),
-		new BehaviourSequence // Use HEALTH
+		new BehaviourSequence // Update SEARCH POINT INDEX
 		({
-			new BehaviourConditional(NotMaxHealth),
-			new BehaviourConditional(HasHealthItem),
-			new BehaviourAction(UseHealthItem)
+			new BehaviourConditionalInverse(MapSearchedEntirely),
+			new BehaviourConditional(ArrivedAtNextSearchPoint),
+			new BehaviourAction(IncrementSearchPoint)
 		}),
 		new BehaviourSequence // Use FOOD
 		({
 			new BehaviourConditional(NotMaxEnergy),
 			new BehaviourConditional(HasFoodItem),
 			new BehaviourAction(UseFoodItem)
+		}),
+		new BehaviourSequence // Use HEALTH
+		({
+			new BehaviourConditional(NotMaxHealth),
+			new BehaviourConditional(HasHealthItem),
+			new BehaviourAction(UseHealthItem)
 		}),
 		new BehaviourSequence // Find ITEMS
 		({
@@ -160,19 +166,10 @@ void TestBoxPlugin::Start()
 			new BehaviourConditional(KnowOfItemsOnGround),
 			new BehaviourAction(SetNearestItemAsGoal)
 		}),
-		new BehaviourSequence // Go to nearest HOUSE
+		new BehaviourSequence // Explore unexplored HOUSES
 		({
-			new BehaviourConditionalInverse(KnowOfItemsOnGround),
-			new BehaviourConditional(LowEnergyOrHealth),
-			new BehaviourConditionalInverse(MapSearchedEntirely),
-			new BehaviourAction(SetGoalToNearestHouse)
-		}),
-		new BehaviourSequence // Search entire map
-		({
-			new BehaviourConditionalInverse(MapSearchedEntirely),
-			new BehaviourAction(SetGoalToNextSearchPoint),
-			new BehaviourConditional(ArrivedAtNextSearchPoint),
-			new BehaviourAction(IncrementSearchPoint)
+			new BehaviourConditional(KnowOfUnexploredHouse),
+			new BehaviourAction(SetGoalToNearestUnexploredHouse)
 		}),
 		new BehaviourSequence // Shoot ENEMIES
 		({
@@ -180,6 +177,11 @@ void TestBoxPlugin::Start()
 			new BehaviourConditional(HasEnemyInRange),
 			new BehaviourConditional(HasEnemyInFOV),
 			new BehaviourAction(AimAtNearestEnemyInFOV)
+		}),
+		new BehaviourSequence // Search entire map
+		({
+			new BehaviourConditionalInverse(MapSearchedEntirely),
+			new BehaviourAction(SetGoalToNextSearchPoint)
 		}),
 		new BehaviourConditionalInverse(MapSearchedEntirely), // Don't go any further if map hasn't been fully searched
 		new BehaviourConditional(IsGoalSet), // Don't go any further if a goal is set
@@ -363,17 +365,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	//	}
 	//}
 
-
-	//if (!m_KnownEnemies.empty())
-	//{
-	//	m_AverageNearbyEnemyPosition = b2Vec2_zero;
-	//	for (size_t i = 0; i < m_KnownEnemies.size(); i++)
-	//	{
-	//		m_AverageNearbyEnemyPosition +=
-	//	}
-	//	m_AverageNearbyEnemyPosition /= m_KnownEnemies.size();
-	//}
-
 	// Add new found houses to cache
 	std::vector<HouseInfo> housesInFOV = FOV_GetHouses();
 	for (size_t i = 0; i < housesInFOV.size(); i++)
@@ -390,14 +381,159 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	DetermineInHouseIndex(agentInfo.Position);
 	if (m_InHouseIndex != -1) 
 	{
-		m_KnownHouses[m_InHouseIndex].secondsSinceLastVisit = 0.0f;
+		m_KnownHouses[m_InHouseIndex].SecondsSinceLastVisit = 0.0f;
 	}
 
 	for (size_t i = 0; i < m_KnownHouses.size(); i++)
 	{
 		if (m_InHouseIndex != i)
 		{
-			m_KnownHouses[i].secondsSinceLastVisit += dt;
+			m_KnownHouses[i].SecondsSinceLastVisit += dt;
+		}
+	}
+
+	if (!foundFood.empty())
+	{
+		auto iter = foundFood.begin();
+		while (iter != foundFood.end())
+		{
+			Food food = *iter;
+			if (food.Fresh)
+			{
+				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
+				if (firstEmptyInventorySlot == -1)
+				{
+					const int foodSlotIndex = InventoryFirstSlotWithItemType(eItemType::FOOD);
+					// Consider dropping something if we have not food and need energy
+					if (foodSlotIndex == -1 && agentInfo.Energy < m_StartingEnergy)
+					{
+						int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
+						if (pistolSlotIndex != -1)
+						{
+							DEBUG_LogMessage("Dropping pistol to make room for food");
+							RemoveItemFromInventory(pistolSlotIndex);
+							firstEmptyInventorySlot = pistolSlotIndex;
+						}
+						else
+						{
+							int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
+							if (healthSlotIndex != -1)
+							{
+								DEBUG_LogMessage("Dropping health pack to make room for food");
+								RemoveItemFromInventory(healthSlotIndex);
+								firstEmptyInventorySlot = healthSlotIndex;
+							}
+							else
+							{
+								assert(false); // If our inventory doesn't have any food, or pistols, it better have health
+								++iter;
+							}
+						}
+					}
+					else
+					{
+						RemoveItemFromInventory(foodSlotIndex);
+						firstEmptyInventorySlot = foodSlotIndex;
+					}
+				}
+
+				if (firstEmptyInventorySlot != -1)
+				{
+					AddItemToInventory(firstEmptyInventorySlot, food.EntityInfo, food.ItemInfo);
+					iter = foundFood.erase(iter);
+				}
+			}
+			else
+			{
+				++iter;
+			}
+		}
+	}
+
+	// If still not empty, we aren't picking them all up. Cache for later
+	for (size_t i = 0; i < foundFood.size(); i++)
+	{
+		if (Contains(m_KnownFoodItems, foundFood[i]))
+		{
+			m_KnownFoodItems[i].Fresh = true;
+		}
+		else
+		{
+			m_KnownFoodItems.push_back(foundFood[i]);
+			RemoveFromKnownItems(foundHealthPacks[i].EntityInfo);
+		}
+	}
+
+	if (!foundHealthPacks.empty())
+	{
+		auto iter = foundHealthPacks.begin();
+		while (iter != foundHealthPacks.end())
+		{
+			HealthPack healthPack = *iter;
+			if (healthPack.Fresh)
+			{
+				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
+				if (firstEmptyInventorySlot == -1)
+				{
+					// Consider dropping something if we have no health but need some
+					const int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
+					if (healthSlotIndex == -1 && agentInfo.Health < m_StartingHealth)
+					{
+						const int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
+						if (pistolSlotIndex != -1)
+						{
+							DEBUG_LogMessage("Dropping pistol to make room for health");
+							RemoveItemFromInventory(pistolSlotIndex);
+							firstEmptyInventorySlot = pistolSlotIndex;
+						}
+						else
+						{
+							const int foodSlotIndex = InventoryFirstSlotWithItemType(eItemType::FOOD);
+							if (foodSlotIndex != -1)
+							{
+								DEBUG_LogMessage("Dropping food to make room for health");
+								RemoveItemFromInventory(foodSlotIndex);
+								firstEmptyInventorySlot = foodSlotIndex;
+							}
+							else
+							{
+								assert(false); // If our inventory doesn't have any health, or pistols, it better have food
+								++iter;
+							}
+						}
+					}
+					else
+					{
+						// Trade with the one we have already just to get it off the ground
+						RemoveItemFromInventory(healthSlotIndex);
+						firstEmptyInventorySlot = healthSlotIndex;
+					}
+				}
+
+				if (firstEmptyInventorySlot != -1)
+				{
+					AddItemToInventory(firstEmptyInventorySlot, healthPack.EntityInfo, healthPack.ItemInfo);
+					iter = foundHealthPacks.erase(iter);
+				}
+			}
+			else
+			{
+				++iter;
+			}
+		}
+	}
+
+	// If still not empty, we aren't picking them all up. Cache for later
+	for (size_t i = 0; i < foundHealthPacks.size(); i++)
+	{
+		if (Contains(m_KnownHealthPacks, foundHealthPacks[i]))
+		{
+			m_KnownHealthPacks[i].Fresh = true;
+		}
+		else
+		{
+			m_KnownHealthPacks.push_back(foundHealthPacks[i]);
+			RemoveFromKnownItems(foundHealthPacks[i].EntityInfo);
 		}
 	}
 
@@ -406,20 +542,20 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		Pistol bestPistol = {};
 
 		Item currentBestPistol = GetItemFromInventory(m_BestPistolIndex);
-		if (currentBestPistol.valid)
+		if (currentBestPistol.Valid)
 		{
 			// Compare new pistols to current one
-			ConstructPistol(currentBestPistol.entityInfo, currentBestPistol.itemInfo, {}, bestPistol);
+			ConstructPistol(currentBestPistol.EntityInfo, currentBestPistol.ItemInfo, {}, bestPistol);
 		}
 
 		float bestValue = 0.0f;
 		auto bestPistolIter = foundPistols.end();
-		for(auto iter = foundPistols.begin(); iter != foundPistols.end(); ++iter)
+		for (auto iter = foundPistols.begin(); iter != foundPistols.end(); ++iter)
 		{
 			Pistol pistol = *iter;
 			const float value = pistol.GetValue();
 
-			if (pistol.fresh && value > bestValue)
+			if (pistol.Fresh && value > bestValue)
 			{
 				bestValue = value;
 				bestPistol = pistol;
@@ -451,7 +587,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	{
 		if (Contains(m_KnownPistols, foundPistols[i]))
 		{
-			m_KnownPistols[i].fresh = true;
+			m_KnownPistols[i].Fresh = true;
 		}
 		else
 		{
@@ -459,154 +595,16 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		}
 	}
 
-	if (!foundHealthPacks.empty())
-	{
-		auto iter = foundHealthPacks.begin();
-		while (iter != foundHealthPacks.end())
-		{
-			HealthPack healthPack = *iter;
-			if (healthPack.fresh)
-			{
-				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
-				if (firstEmptyInventorySlot == -1)
-				{
-					// Consider dropping something if we have no health but need some
-					const int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
-					if (healthSlotIndex == -1 && agentInfo.Health < m_StartingHealth)
-					{
-						const int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
-						if (pistolSlotIndex != -1)
-						{
-							RemoveItemFromInventory(pistolSlotIndex);
-							firstEmptyInventorySlot = pistolSlotIndex;
-						}
-						else
-						{
-							const int foodSlotIndex = InventoryFirstSlotWithItemType(eItemType::FOOD);
-							if (foodSlotIndex != -1)
-							{
-								RemoveItemFromInventory(foodSlotIndex);
-								firstEmptyInventorySlot = foodSlotIndex;
-							}
-							else
-							{
-								assert(false); // If our inventory doesn't have any health, or pistols, it better have food
-								++iter;
-							}
-						}
-					}
-					else
-					{
-						++iter;
-					}
-				}
 
-				if (firstEmptyInventorySlot != -1)
-				{
-					AddItemToInventory(firstEmptyInventorySlot, healthPack.entityInfo, healthPack.itemInfo);
-					iter = foundHealthPacks.erase(iter);
-				}
-			}
-			else
-			{
-				++iter;
-			}
-		}
-	}
-
-	// If still not empty, we aren't picking them all up. Cache for later
-	for (size_t i = 0; i < foundHealthPacks.size(); i++)
-	{
-		if (Contains(m_KnownHealthPacks, foundHealthPacks[i]))
-		{
-			m_KnownHealthPacks[i].fresh = true;
-		}
-		else
-		{
-			m_KnownHealthPacks.push_back(foundHealthPacks[i]);
-			RemoveFromKnownItems(foundHealthPacks[i].entityInfo);
-		}
-	}
-
-	if (!foundFood.empty())
-	{
-		auto iter = foundFood.begin();
-		while (iter != foundFood.end())
-		{
-			Food food = *iter;
-			if (food.fresh)
-			{
-				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
-				if (firstEmptyInventorySlot == -1)
-				{
-					const int foodSlotIndex = InventoryFirstSlotWithItemType(eItemType::FOOD);
-					// Consider dropping something if we have not food and need energy
-					if (foodSlotIndex == -1 && agentInfo.Energy < m_StartingEnergy)
-					{
-						int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
-						if (pistolSlotIndex != -1)
-						{
-							RemoveItemFromInventory(pistolSlotIndex);
-							firstEmptyInventorySlot = pistolSlotIndex;
-						}
-						else
-						{
-							int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
-							if (healthSlotIndex != -1)
-							{
-								RemoveItemFromInventory(healthSlotIndex);
-								firstEmptyInventorySlot = healthSlotIndex;
-							}
-							else
-							{
-								assert(false); // If our inventory doesn't have any food, or pistols, it better have health
-								++iter;
-							}
-						}
-					}
-					else
-					{
-						++iter;
-					}
-				}
-
-				if (firstEmptyInventorySlot != -1)
-				{
-					AddItemToInventory(firstEmptyInventorySlot, food.entityInfo, food.itemInfo);
-					iter = foundFood.erase(iter);
-				}
-			}
-			else
-			{
-				++iter;
-			}
-		}
-	}
-
-	// If still not empty, we aren't picking them all up. Cache for later
-	for (size_t i = 0; i < foundFood.size(); i++)
-	{
-		if (Contains(m_KnownFoodItems, foundFood[i]))
-		{
-			m_KnownFoodItems[i].fresh = true;
-		}
-		else
-		{
-			m_KnownFoodItems.push_back(foundFood[i]);
-			RemoveFromKnownItems(foundHealthPacks[i].entityInfo);
-		}
-	}
-
-
-	if (agentInfo.Stamina >= 9.9f)
-	{
-		agentInfo.RunMode = true;
-	}
-	else if (agentInfo.Stamina <= 0.1f)
-	{
+	//if (agentInfo.Stamina >= 9.9f)
+	//{
+	//	agentInfo.RunMode = true;
+	//}
+	//else if (agentInfo.Stamina <= 0.1f)
+	//{
 		// Start regenerating stamina
 		agentInfo.RunMode = false;
-	}
+	//}
 
 	//if (b2Distance(m_NearestEnemy.Position, agentInfo.Position) < agentInfo.FOV_Range)
 	{
@@ -637,12 +635,16 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	bool goalWasSet = m_GoalSet;
 	pBlackboard->GetData("GoalSet", m_GoalSet);
 
+
 	m_SecondsSinceNavMeshTargetUpdate += dt;
 
 	if (m_GoalSet)
 	{
 		pBlackboard->GetData("Goal", m_Goal);
-		if (m_GoalSet != goalWasSet || m_SecondsSinceNavMeshTargetUpdate > m_SecondsBetweenNavMeshTargetUpdates)
+		float distSqr = b2DistanceSquared(agentInfo.Position, m_Goal.Position);
+		if (distSqr < 1.0f || 
+			m_GoalSet != goalWasSet || 
+			m_SecondsSinceNavMeshTargetUpdate > m_SecondsBetweenNavMeshTargetUpdates)
 		{
 			m_SecondsSinceNavMeshTargetUpdate = 0.0f;
 			m_NextNavMeshGoal = NAVMESH_GetClosestPathPoint(m_Goal.Position);
@@ -671,7 +673,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 	for (size_t i = 0; i < m_KnownHouses.size(); i++)
 	{
-		HouseInfo info = m_KnownHouses[i].info;
+		HouseInfo info = m_KnownHouses[i].Info;
 		
 		b2Vec2 points[4] = {
 			b2Vec2(info.Center.x - (info.Size.x / 2.0f + 2.0f), info.Center.y - (info.Size.y / 2.0f + 2.0f)),
@@ -784,7 +786,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 			Item item = GetItemFromInventory(m_BestPistolIndex);
 			Pistol pistol;
-			ConstructPistol(item.entityInfo, item.itemInfo, {}, pistol);
+			ConstructPistol(item.EntityInfo, item.ItemInfo, {}, pistol);
 			if (pistol.Ammo == 0)
 			{
 				RemoveItemFromInventory(m_BestPistolIndex);
@@ -795,10 +797,10 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				// Check for other pistols to put in this slot
 				for (size_t i = 1; i < m_Inventory.size(); i++)
 				{
-					if (m_Inventory[i].itemInfo.Type == eItemType::PISTOL)
+					if (m_Inventory[i].ItemInfo.Type == eItemType::PISTOL)
 					{
 						Pistol pistol = {};
-						ConstructPistol(m_Inventory[i].entityInfo, m_Inventory[i].itemInfo, {}, pistol);
+						ConstructPistol(m_Inventory[i].EntityInfo, m_Inventory[i].ItemInfo, {}, pistol);
 						const float value = pistol.GetValue();
 						if (value > bestValue)
 						{
@@ -835,10 +837,10 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 			for (size_t i = 0; i < m_Inventory.size(); i++)
 			{
-				if (m_Inventory[i].valid && m_Inventory[i].itemInfo.Type == eItemType::HEALTH)
+				if (m_Inventory[i].Valid && m_Inventory[i].ItemInfo.Type == eItemType::HEALTH)
 				{
 					HealthPack pack;
-					ConstructHealthPack(m_Inventory[i].entityInfo, m_Inventory[i].itemInfo, {}, pack);
+					ConstructHealthPack(m_Inventory[i].EntityInfo, m_Inventory[i].ItemInfo, {}, pack);
 
 					// Don't use packs that have more healing than we need
 					if (pack.HealingAmount <= healingNeeded &&
@@ -872,10 +874,10 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 			for (size_t i = 0; i < m_Inventory.size(); i++)
 			{
-				if (m_Inventory[i].valid && m_Inventory[i].itemInfo.Type == eItemType::FOOD)
+				if (m_Inventory[i].Valid && m_Inventory[i].ItemInfo.Type == eItemType::FOOD)
 				{
 					Food food;
-					ConstructFood(m_Inventory[i].entityInfo, m_Inventory[i].itemInfo, {}, food);
+					ConstructFood(m_Inventory[i].EntityInfo, m_Inventory[i].ItemInfo, {}, food);
 
 					// Don't use packs that have more healing than we need
 					if (food.EnergyAmount <= energyNeeded &&
@@ -909,15 +911,15 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 	for (size_t i = 0; i < m_KnownPistols.size(); i++)
 	{
-		m_KnownPistols[i].fresh = false;
+		m_KnownPistols[i].Fresh = false;
 	}
 	for (size_t i = 0; i < m_KnownHealthPacks.size(); i++)
 	{
-		m_KnownHealthPacks[i].fresh = false;
+		m_KnownHealthPacks[i].Fresh = false;
 	}
 	for (size_t i = 0; i < m_KnownFoodItems.size(); i++)
 	{
-		m_KnownFoodItems[i].fresh = false;
+		m_KnownFoodItems[i].Fresh = false;
 	}
 
 	return output;
@@ -935,14 +937,14 @@ void TestBoxPlugin::ExtendUI_ImGui()
 				m_KnownEnemies[i].Position.x, m_KnownEnemies[i].Position.y, m_KnownEnemies[i].InFieldOfView ? "true" : "false");
 		}
 	}
-	if (!m_KnownPistols.empty())
+	if (!m_KnownFoodItems.empty())
 	{
-		ImGui::Text("Known pistols:");
-		for (size_t i = 0; i < m_KnownPistols.size(); i++)
+		ImGui::Text("Known food:");
+		for (size_t i = 0; i < m_KnownFoodItems.size(); i++)
 		{
-			ImGui::Text("- Position: (%.2f, %.2f)\n  Ammo: %i\n  DPS: %.2f\n  Range: %.2f",
-				m_KnownPistols[i].Position.x, m_KnownPistols[i].Position.y,
-				m_KnownPistols[i].Ammo, m_KnownPistols[i].DPS, m_KnownPistols[i].Range);
+			ImGui::Text("- Position: (%.2f, %.2f)\n  Energy: %i",
+				m_KnownFoodItems[i].Position.x, m_KnownFoodItems[i].Position.y,
+				m_KnownFoodItems[i].EnergyAmount);
 		}
 	}
 	if (!m_KnownHealthPacks.empty())
@@ -955,14 +957,14 @@ void TestBoxPlugin::ExtendUI_ImGui()
 				m_KnownHealthPacks[i].HealingAmount);
 		}
 	}
-	if (!m_KnownFoodItems.empty())
+	if (!m_KnownPistols.empty())
 	{
-		ImGui::Text("Known food:");
-		for (size_t i = 0; i < m_KnownFoodItems.size(); i++)
+		ImGui::Text("Known pistols:");
+		for (size_t i = 0; i < m_KnownPistols.size(); i++)
 		{
-			ImGui::Text("- Position: (%.2f, %.2f)\n  Energy: %i",
-				m_KnownFoodItems[i].Position.x, m_KnownFoodItems[i].Position.y,
-				m_KnownFoodItems[i].EnergyAmount);
+			ImGui::Text("- Position: (%.2f, %.2f)\n  Ammo: %i\n  DPS: %.2f\n  Range: %.2f",
+				m_KnownPistols[i].Position.x, m_KnownPistols[i].Position.y,
+				m_KnownPistols[i].Ammo, m_KnownPistols[i].DPS, m_KnownPistols[i].Range);
 		}
 	}
 }
@@ -983,14 +985,14 @@ void TestBoxPlugin::AddItemToInventory(int slotID, const EntityInfo& entityInfo,
 {
 	if (slotID < 0 || slotID >= (int)m_Inventory.size()) return;
 
-	if (!m_Inventory[slotID].valid)
+	if (!m_Inventory[slotID].Valid)
 	{
 		INVENTORY_AddItem(slotID, itemInfo);
-		m_Inventory[slotID].entityInfo = entityInfo;
-		m_Inventory[slotID].itemInfo = itemInfo;
-		m_Inventory[slotID].valid = true;
+		m_Inventory[slotID].EntityInfo = entityInfo;
+		m_Inventory[slotID].ItemInfo = itemInfo;
+		m_Inventory[slotID].Valid = true;
 
-		RemoveFromKnownItems(m_Inventory[slotID].entityInfo);
+		RemoveFromKnownItems(m_Inventory[slotID].EntityInfo);
 	}
 }
 
@@ -998,29 +1000,29 @@ void TestBoxPlugin::RemoveItemFromInventory(int slotID)
 {
 	if (slotID < 0 || slotID >= (int)m_Inventory.size()) return;
 
-	if (m_Inventory[slotID].valid)
+	if (m_Inventory[slotID].Valid)
 	{
-		RemoveFromKnownItems(m_Inventory[slotID].entityInfo);
+		RemoveFromKnownItems(m_Inventory[slotID].EntityInfo);
 
 		INVENTORY_RemoveItem(slotID);
-		m_Inventory[slotID].itemInfo = {};
-		m_Inventory[slotID].valid = false;
+		m_Inventory[slotID].ItemInfo = {};
+		m_Inventory[slotID].Valid = false;
 	}
 }
 
 Item TestBoxPlugin::GetItemFromInventory(int slotID)
 {
 	Item invalidItem = {};
-	invalidItem.valid = false;
+	invalidItem.Valid = false;
 
 	if (slotID < 0 || slotID >= (int)m_Inventory.size()) return invalidItem;
 
-	if (m_Inventory[slotID].valid)
+	if (m_Inventory[slotID].Valid)
 	{
 		ItemInfo newInfo;
 		INVENTORY_GetItem(slotID, newInfo);
 
-		m_Inventory[slotID].itemInfo = newInfo;
+		m_Inventory[slotID].ItemInfo = newInfo;
 	}
 
 	return m_Inventory[slotID];
@@ -1030,7 +1032,7 @@ void TestBoxPlugin::UseItemInInventory(int slotID)
 {
 	if (slotID < 0 || slotID >= (int)m_Inventory.size()) return;
 
-	if (m_Inventory[slotID].valid)
+	if (m_Inventory[slotID].Valid)
 	{
 		INVENTORY_UseItem(slotID);
 	}
@@ -1042,7 +1044,7 @@ int TestBoxPlugin::InventoryItemCount(eItemType itemType)
 
 	for (size_t i = 0; i < m_Inventory.size(); i++)
 	{
-		if (m_Inventory[i].itemInfo.Type == itemType)
+		if (m_Inventory[i].ItemInfo.Type == itemType)
 		{
 			++count;
 		}
@@ -1055,7 +1057,7 @@ int TestBoxPlugin::InventoryFirstSlotWithItemType(eItemType itemType)
 {
 	for (int i = 0; i < (int)m_Inventory.size(); i++)
 	{
-		if (m_Inventory[i].itemInfo.Type == itemType)
+		if (m_Inventory[i].ItemInfo.Type == itemType)
 		{
 			return i;
 		}
@@ -1086,32 +1088,29 @@ void TestBoxPlugin::ConstructPistol(const EntityInfo& entityInfo, const ItemInfo
 {
 	pistol.entityInfo = entityInfo;
 	pistol.itemInfo = itemInfo;
-	if (!ITEM_GetMetadata(itemInfo, "ammo", pistol.Ammo)) // "ammo metadata not found on pistol!\n");
-	{
-		pistol.itemInfo.ItemHash = 1;
-	}
+	LogOnFail(ITEM_GetMetadata(itemInfo, "ammo", pistol.Ammo), "ammo metadata not found on pistol!\n");
 	LogOnFail(ITEM_GetMetadata(itemInfo, "dps", pistol.DPS), "dps metadata not found on pistol!\n");
 	LogOnFail(ITEM_GetMetadata(itemInfo, "range", pistol.Range), "range metadata not found on pistol!\n");
 	pistol.Position = Position;
-	pistol.fresh = true;
+	pistol.Fresh = true;
 }
 
 void TestBoxPlugin::ConstructHealthPack(const EntityInfo& entityInfo, const ItemInfo& itemInfo, b2Vec2 Position, HealthPack& healthPack)
 {
-	healthPack.entityInfo = entityInfo;
-	healthPack.itemInfo = itemInfo;
+	healthPack.EntityInfo = entityInfo;
+	healthPack.ItemInfo = itemInfo;
 	LogOnFail(ITEM_GetMetadata(itemInfo, "health", healthPack.HealingAmount), "health metadata not found on health!\n");
 	healthPack.Position = Position;
-	healthPack.fresh = true;
+	healthPack.Fresh = true;
 }
 
 void TestBoxPlugin::ConstructFood(const EntityInfo& entityInfo, const ItemInfo& itemInfo, b2Vec2 Position, Food& food)
 {
 	LogOnFail(ITEM_GetMetadata(itemInfo, "energy", food.EnergyAmount), "energy metadata not found on food!\n");
-	food.entityInfo = entityInfo;
-	food.itemInfo = itemInfo;
+	food.EntityInfo = entityInfo;
+	food.ItemInfo = itemInfo;
 	food.Position = Position;
-	food.fresh = true;
+	food.Fresh = true;
 }
 
 void TestBoxPlugin::ConstructEnemy(const EntityInfo& entityInfo, b2Vec2 Position, Enemy& enemy)
@@ -1127,8 +1126,9 @@ void TestBoxPlugin::ConstructEnemy(const EntityInfo& entityInfo, b2Vec2 Position
 
 void TestBoxPlugin::ConstructHouse(const HouseInfo& houseInfo, House& house)
 {
-	house.info = houseInfo;
-	house.secondsSinceLastVisit = m_SecondsBetweenHouseRevisits + 1.0f; // Flag so we know to go in here
+	house.Info = houseInfo;
+	house.SecondsSinceLastVisit = m_SecondsBetweenHouseRevisits + 1.0f; // Flag so we know to go in here
+	house.Unexplored = true;
 }
 
 //int TestBoxPlugin::InventoryItemCount(eItemType itemType)
@@ -1150,7 +1150,7 @@ int TestBoxPlugin::FirstEmptyInventorySlotID() const
 {
 	for (size_t i = 0; i < m_Inventory.size(); i++)
 	{
-		if (!m_Inventory[i].valid)
+		if (!m_Inventory[i].Valid)
 		{
 			return i;
 		}
@@ -1165,7 +1165,7 @@ int TestBoxPlugin::EmptyInventorySlots() const
 
 	for (size_t i = 0; i < m_Inventory.size(); i++)
 	{
-		if (!m_Inventory[i].valid)
+		if (!m_Inventory[i].Valid)
 		{
 			++emptySlots;
 		}
@@ -1190,8 +1190,9 @@ void TestBoxPlugin::DetermineInHouseIndex(const b2Vec2& agentPos)
 {
 	for (size_t i = 0; i < m_KnownHouses.size(); i++)
 	{
-		if (PointInAABB(agentPos, m_KnownHouses[i].info.Center, m_KnownHouses[i].info.Size))
+		if (PointInAABB(agentPos, m_KnownHouses[i].Info.Center, m_KnownHouses[i].Info.Size))
 		{
+			m_KnownHouses[i].Unexplored = false;
 			m_InHouseIndex = i;
 			return;
 		}

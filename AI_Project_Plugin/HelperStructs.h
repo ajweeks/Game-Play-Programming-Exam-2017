@@ -422,9 +422,9 @@ struct ItemInfo
 
 struct Item
 {
-	EntityInfo entityInfo;
-	ItemInfo itemInfo;
-	bool valid; // False for empty items (instead of nullptr)
+	EntityInfo EntityInfo;
+	ItemInfo ItemInfo;
+	bool Valid; // False for empty items (instead of nullptr)
 };
 bool operator==(const Item& lhs, const Item& rhs);
 
@@ -438,29 +438,29 @@ struct Pistol
 	int Ammo;
 	float DPS;
 	float Range;
-	bool fresh; // True when we picked this item up this frame, false when stale (hash is then incorrect)
+	bool Fresh; // True when we picked this item up this frame, false when stale (hash is then incorrect)
 };
 bool operator==(const Pistol& lhs, const Pistol& rhs);
 
 struct HealthPack
 {
-	EntityInfo entityInfo;
-	ItemInfo itemInfo;
+	EntityInfo EntityInfo;
+	ItemInfo ItemInfo;
 
 	b2Vec2 Position;
 	int HealingAmount;
-	bool fresh; // True when we picked this item up this frame, false when stale (hash is then incorrect)
+	bool Fresh; // True when we picked this item up this frame, false when stale (hash is then incorrect)
 };
 bool operator==(const HealthPack& lhs, const HealthPack& rhs);
 
 struct Food
 {
-	EntityInfo entityInfo;
-	ItemInfo itemInfo;
+	EntityInfo EntityInfo;
+	ItemInfo ItemInfo;
 
 	b2Vec2 Position;
 	int EnergyAmount;
-	bool fresh; // True when we picked this item up this frame, false when stale (hash is then incorrect)
+	bool Fresh; // True when we picked this item up this frame, false when stale (hash is then incorrect)
 };
 bool operator==(const Food& lhs, const Food& rhs);
 
@@ -472,8 +472,9 @@ struct HouseInfo
 
 struct House
 {
-	HouseInfo info;
-	float secondsSinceLastVisit;
+	HouseInfo Info;
+	float SecondsSinceLastVisit;
+	bool Unexplored;
 };
 bool operator==(const House& lhs, const House& rhs);
 

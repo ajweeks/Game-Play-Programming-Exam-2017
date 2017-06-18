@@ -54,7 +54,7 @@ protected:
 
 	float m_SecondsElapsed;
 	float m_SecondsSinceNavMeshTargetUpdate;
-	float m_SecondsBetweenNavMeshTargetUpdates = 0.2f;
+	float m_SecondsBetweenNavMeshTargetUpdates = 0.1f;
 	Enemy m_EmptyTargetEnemy;
 
 	BehaviourTree* m_pBehaviourTree = nullptr;
