@@ -40,7 +40,7 @@ void TestBoxPlugin::Start()
 
 	int xCount = 3;
 	int yCount = 3;
-	float edgeBuffer = 45.0f;
+	float edgeBuffer = 40.0f;
 	float searchPointOffsetX = minWorldCoords.x + edgeBuffer;
 	float searchPointOffsetY = minWorldCoords.y + edgeBuffer;
 	float adjustedWorldWidth = (worldInfo.Dimensions.x - edgeBuffer * 2.0f) / (float)(xCount - 1);
@@ -66,20 +66,17 @@ void TestBoxPlugin::Start()
 	auto pSeekBehaviour = new SteeringBehaviours::Seek();
 	pSeekBehaviour->SetTarget(&m_NextNavMeshGoal);
 	m_BehaviourVec.push_back(pSeekBehaviour);
-	auto pWanderBehaviour = new SteeringBehaviours::Wander();
-	m_BehaviourVec.push_back(pWanderBehaviour);
+	//auto pWanderBehaviour = new SteeringBehaviours::Wander();
+	//m_BehaviourVec.push_back(pWanderBehaviour);
 	auto pFleeBehaviour = new SteeringBehaviours::Flee();
-	pFleeBehaviour->SetTarget(&m_NearestEnemy);
+	pFleeBehaviour->SetTarget(&m_AverageNearbyEnemy);
 	m_BehaviourVec.push_back(pFleeBehaviour);
-	//auto pSeekOtherSideOfMapBehaviour = new SteeringBehaviours::Seek();
-	//pSeekOtherSideOfMapBehaviour->SetTarget(&m_OtherSideOfMapGoal);
-	//m_BehaviourVec.push_back(pSeekOtherSideOfMapBehaviour);
 
-	// Search outside behaviour
 	std::vector<CombinedSB::BehaviourAndWeight> behavioursAndWeights;
 	//behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.0f));
 	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 1.0f));
-	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, 0.25f));
+	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, m_FleeWeightNotNearEnemies));
+	m_FleeBehaviourWeightPairIndex = behavioursAndWeights.size() - 1;
 	m_pBlendedBehaviour = new CombinedSB::BlendedSteering(behavioursAndWeights);
 	
 	m_BehaviourVec.push_back(m_pBlendedBehaviour);
@@ -95,18 +92,12 @@ void TestBoxPlugin::Start()
 	pBlackboard->AddData("Goal", m_Goal);
 	pBlackboard->AddData("NextNavMeshGoal", m_NextNavMeshGoal);
 	pBlackboard->AddData("GoalSet", m_GoalSet);
-	//pBlackboard->AddData("SoftGoal", m_SoftGoal);
-	//pBlackboard->AddData("SoftGoalSet", m_SoftGoalSet);
-	//pBlackboard->AddData("OutsideBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pOutsideHouseSteeringBehaviour));
-	//pBlackboard->AddData("SeekItemBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(pSeekItemSteeringBehaviour));
 	pBlackboard->AddData("CurrentBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(m_CurrentSteeringBehaviour));
 	pBlackboard->AddData("Inventory", &m_Inventory);
 	pBlackboard->AddData("MaxHealth", agentInfo.Health);
 	pBlackboard->AddData("MaxEnergy", agentInfo.Energy);
 	pBlackboard->AddData("LongestPistolRange", 0.0f);
 	pBlackboard->AddData("TargetEnemy", m_EmptyTargetEnemy);
-	pBlackboard->AddData("NearestEnemyPosition", &m_NearestEnemy);
-	pBlackboard->AddData("AverageNearbyEnemyPostion", m_AverageNearbyEnemyPosition);
 	pBlackboard->AddData("KnownItems", &m_KnownItems);
 	pBlackboard->AddData("KnownHealthPacks", &m_KnownHealthPacks);
 	pBlackboard->AddData("KnownFoodItems", &m_KnownFoodItems);
@@ -202,34 +193,35 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	WorldInfo worldInfo = WORLD_GetInfo(); //Contains the location of the center of the world and the dimensions
 	AgentInfo agentInfo = AGENT_GetInfo(); //Contains all Agent Parameters, retrieved by copy!
 
-	b2Vec2 minCoords = worldInfo.Center - worldInfo.Dimensions / 2.0f;
-	b2Vec2 maxCoords = worldInfo.Center + worldInfo.Dimensions / 2.0f;
+	const b2Vec2 minWorldCoords = worldInfo.Center - worldInfo.Dimensions / 2.0f;
+	const b2Vec2 maxWorldCoords = worldInfo.Center + worldInfo.Dimensions / 2.0f;
 
-	auto iter = m_KnownEnemies.begin();
-	while (iter != m_KnownEnemies.end())
+	if (!m_KnownEnemies.empty())
 	{
-		iter->InFieldOfView = false;
-		iter->SecondsSinceInsideFOV += dt;
-		iter->PredictedPosition += iter->Velocity * dt;
+		auto iter = m_KnownEnemies.begin();
+		while (iter != m_KnownEnemies.end())
+		{
+			iter->InFieldOfView = false;
+			iter->SecondsSinceInsideFOV += dt;
+			iter->PredictedPosition += iter->Velocity * dt;
 
-		if (iter->SecondsSinceInsideFOV > m_SecondsToEstimateEnemyPositionsFor)
-		{
-			iter = m_KnownEnemies.erase(iter);
-		}
-		else
-		{
-			++iter;
+			if (iter->SecondsSinceInsideFOV > m_SecondsToEstimateEnemyPositionsFor)
+			{
+				iter = m_KnownEnemies.erase(iter);
+			}
+			else
+			{
+				++iter;
+			}
 		}
 	}
 
-	// Forget about enemies seen before, they've probably moved now
 	std::vector<Enemy> enemiesInFOV;
+	std::vector<Food> foodInFOV;
+	std::vector<HealthPack> healthPacksInFOV;
+	std::vector<Pistol> pistolsInFOV;
 
-	std::vector<Pistol> foundPistols;
-	std::vector<HealthPack> foundHealthPacks;
-	std::vector<Food> foundFood;
-
-	// Add new found entities to cache
+	// Add new found entities to world cache
 	std::vector<EntityInfo> entitiesInFOV = FOV_GetEntities();
 	for (auto iter = entitiesInFOV.begin(); iter != entitiesInFOV.end(); ++iter)
 	{
@@ -251,20 +243,46 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				{
 					Pistol pistol = {};
 					ConstructPistol(entityInfo, itemInfo, entityInfo.Position, pistol);
-					if (pistol.Ammo > 0 && pistol.DPS > 0 && pistol.Range > 0 && !Contains(foundPistols, pistol))
+					if (pistol.Ammo > 0 && pistol.DPS > 0 && pistol.Range > 0)
 					{
-						foundPistols.push_back(pistol);
-						addedToList = true;
+						if (!Contains(pistolsInFOV, pistol))
+						{
+							pistolsInFOV.push_back(pistol);
+							addedToList = true;
+						}
+					}
+					else
+					{
+						int firstFreeInventorySlot = FirstEmptyInventorySlotID();
+						if (firstFreeInventorySlot != -1)
+						{
+							AddItemToInventory(firstFreeInventorySlot, entityInfo, itemInfo);
+							RemoveItemFromInventory(firstFreeInventorySlot);
+							DEBUG_LogMessage("Disposing of useless pistol\n");
+						}
 					}
 				} break;
 				case eItemType::HEALTH:
 				{
 					HealthPack healthPack = {};
 					ConstructHealthPack(entityInfo, itemInfo, entityInfo.Position, healthPack);
-					if (healthPack.HealingAmount > 0 && !Contains(foundHealthPacks, healthPack))
+					if (healthPack.HealingAmount > 0)
 					{
-						foundHealthPacks.push_back(healthPack);
-						addedToList = true;
+						if (!Contains(healthPacksInFOV, healthPack))
+						{
+							healthPacksInFOV.push_back(healthPack);
+							addedToList = true;
+						}
+					}
+					else
+					{
+						int firstFreeInventorySlot = FirstEmptyInventorySlotID();
+						if (firstFreeInventorySlot != -1)
+						{
+							AddItemToInventory(firstFreeInventorySlot, entityInfo, itemInfo);
+							RemoveItemFromInventory(firstFreeInventorySlot);
+							DEBUG_LogMessage("Disposing of useless health pack\n");
+						}
 					}
 				} break;
 				case eItemType::FOOD:
@@ -272,10 +290,23 @@ PluginOutput TestBoxPlugin::Update(float dt)
 					Food food = {};
 					ConstructFood(entityInfo, itemInfo, entityInfo.Position, food);
 
-					if (food.EnergyAmount > 0 && !Contains(foundFood, food))
+					if (food.EnergyAmount > 0)
 					{
-						foundFood.push_back(food);
-						addedToList = true;
+						if (!Contains(foodInFOV, food))
+						{
+							foodInFOV.push_back(food);
+							addedToList = true;
+						}
+					}
+					else
+					{
+						int firstFreeInventorySlot = FirstEmptyInventorySlotID();
+						if (firstFreeInventorySlot != -1)
+						{
+							AddItemToInventory(firstFreeInventorySlot, entityInfo, itemInfo);
+							RemoveItemFromInventory(firstFreeInventorySlot);
+							DEBUG_LogMessage("Disposing of useless food\n");
+						}
 					}
 				} break;
 				case eItemType::GARBAGE:
@@ -347,23 +378,39 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		}
 	}
 
-	// Check if any known items are not in our FOV but we still think they're there
-	//if (!m_KnownItems.empty())
-	//{
-	//	auto iter = m_KnownItems.begin();
-	//	while (iter != m_KnownItems.end())
-	//	{
-	//		EntityInfo& knownItem = *iter;
-	//		if (!Contains(entitiesInFOV, knownItem) && PointInFOV(knownItem.Position, agentInfo))
-	//		{
-	//			iter = m_KnownItems.erase(iter);
-	//		}
-	//		else
-	//		{
-	//			++iter;
-	//		}
-	//	}
-	//}
+	m_AverageNearbyEnemy.Position = b2Vec2_zero;
+	if (!m_KnownEnemies.empty())
+	{
+		int nearbyEnemyCount = 0;
+		for (auto iter = m_KnownEnemies.begin(); iter != m_KnownEnemies.end(); ++iter)
+		{
+			Enemy& knownEnemy = *iter;
+
+			b2Vec2 enemyPos;
+			if (knownEnemy.InFieldOfView) enemyPos = knownEnemy.Position;
+			else enemyPos = knownEnemy.PredictedPosition;
+
+			if (b2DistanceSquared(enemyPos, agentInfo.Position) < agentInfo.FOV_Range * agentInfo.FOV_Range)
+			{
+				++nearbyEnemyCount;
+				m_AverageNearbyEnemy.Position += enemyPos;
+			}
+		}
+
+		if (nearbyEnemyCount > 0)
+		{
+			m_AverageNearbyEnemy.Position = m_AverageNearbyEnemy.Position /(float)m_KnownEnemies.size();
+			m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNearEnemies);
+		}
+		else
+		{
+			m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNotNearEnemies);
+		}
+	}
+	else
+	{
+		m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNotNearEnemies);
+	}
 
 	// Add new found houses to cache
 	std::vector<HouseInfo> housesInFOV = FOV_GetHouses();
@@ -392,10 +439,10 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		}
 	}
 
-	if (!foundFood.empty())
+	if (!foodInFOV.empty())
 	{
-		auto iter = foundFood.begin();
-		while (iter != foundFood.end())
+		auto iter = foodInFOV.begin();
+		while (iter != foodInFOV.end())
 		{
 			Food food = *iter;
 			if (food.Fresh)
@@ -403,44 +450,35 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				int firstEmptyInventorySlot = FirstEmptyInventorySlotID();
 				if (firstEmptyInventorySlot == -1)
 				{
-					const int foodSlotIndex = InventoryFirstSlotWithItemType(eItemType::FOOD);
-					// Consider dropping something if we have not food and need energy
-					if (foodSlotIndex == -1 && agentInfo.Energy < m_StartingEnergy)
+					// Always drop other items for food - it's that hard to come by
+					int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
+					if (pistolSlotIndex != -1)
 					{
-						int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
-						if (pistolSlotIndex != -1)
-						{
-							DEBUG_LogMessage("Dropping pistol to make room for food");
-							RemoveItemFromInventory(pistolSlotIndex);
-							firstEmptyInventorySlot = pistolSlotIndex;
-						}
-						else
-						{
-							int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
-							if (healthSlotIndex != -1)
-							{
-								DEBUG_LogMessage("Dropping health pack to make room for food");
-								RemoveItemFromInventory(healthSlotIndex);
-								firstEmptyInventorySlot = healthSlotIndex;
-							}
-							else
-							{
-								assert(false); // If our inventory doesn't have any food, or pistols, it better have health
-								++iter;
-							}
-						}
+						DEBUG_LogMessage("Dropping pistol to make room for food");
+						RemoveItemFromInventory(pistolSlotIndex);
+						firstEmptyInventorySlot = pistolSlotIndex;
 					}
 					else
 					{
-						RemoveItemFromInventory(foodSlotIndex);
-						firstEmptyInventorySlot = foodSlotIndex;
+						int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
+						if (healthSlotIndex != -1)
+						{
+							DEBUG_LogMessage("Dropping health pack to make room for food");
+							RemoveItemFromInventory(healthSlotIndex);
+							firstEmptyInventorySlot = healthSlotIndex;
+						}
+						else
+						{
+							assert(false); // If our inventory doesn't have any food, or pistols, it better have health
+							++iter;
+						}
 					}
 				}
 
 				if (firstEmptyInventorySlot != -1)
 				{
 					AddItemToInventory(firstEmptyInventorySlot, food.EntityInfo, food.ItemInfo);
-					iter = foundFood.erase(iter);
+					iter = foodInFOV.erase(iter);
 				}
 			}
 			else
@@ -451,23 +489,23 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	}
 
 	// If still not empty, we aren't picking them all up. Cache for later
-	for (size_t i = 0; i < foundFood.size(); i++)
+	for (size_t i = 0; i < foodInFOV.size(); i++)
 	{
-		if (Contains(m_KnownFoodItems, foundFood[i]))
+		if (Contains(m_KnownFoodItems, foodInFOV[i]))
 		{
 			m_KnownFoodItems[i].Fresh = true;
 		}
 		else
 		{
-			m_KnownFoodItems.push_back(foundFood[i]);
-			RemoveFromKnownItems(foundHealthPacks[i].EntityInfo);
+			m_KnownFoodItems.push_back(foodInFOV[i]);
+			RemoveFromKnownItems(healthPacksInFOV[i].EntityInfo);
 		}
 	}
 
-	if (!foundHealthPacks.empty())
+	if (!healthPacksInFOV.empty())
 	{
-		auto iter = foundHealthPacks.begin();
-		while (iter != foundHealthPacks.end())
+		auto iter = healthPacksInFOV.begin();
+		while (iter != healthPacksInFOV.end())
 		{
 			HealthPack healthPack = *iter;
 			if (healthPack.Fresh)
@@ -513,7 +551,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				if (firstEmptyInventorySlot != -1)
 				{
 					AddItemToInventory(firstEmptyInventorySlot, healthPack.EntityInfo, healthPack.ItemInfo);
-					iter = foundHealthPacks.erase(iter);
+					iter = healthPacksInFOV.erase(iter);
 				}
 			}
 			else
@@ -524,20 +562,20 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	}
 
 	// If still not empty, we aren't picking them all up. Cache for later
-	for (size_t i = 0; i < foundHealthPacks.size(); i++)
+	for (size_t i = 0; i < healthPacksInFOV.size(); i++)
 	{
-		if (Contains(m_KnownHealthPacks, foundHealthPacks[i]))
+		if (Contains(m_KnownHealthPacks, healthPacksInFOV[i]))
 		{
 			m_KnownHealthPacks[i].Fresh = true;
 		}
 		else
 		{
-			m_KnownHealthPacks.push_back(foundHealthPacks[i]);
-			RemoveFromKnownItems(foundHealthPacks[i].EntityInfo);
+			m_KnownHealthPacks.push_back(healthPacksInFOV[i]);
+			RemoveFromKnownItems(healthPacksInFOV[i].EntityInfo);
 		}
 	}
 
-	if (!foundPistols.empty())
+	if (!pistolsInFOV.empty())
 	{
 		Pistol bestPistol = {};
 
@@ -549,8 +587,8 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		}
 
 		float bestValue = 0.0f;
-		auto bestPistolIter = foundPistols.end();
-		for (auto iter = foundPistols.begin(); iter != foundPistols.end(); ++iter)
+		auto bestPistolIter = pistolsInFOV.end();
+		for (auto iter = pistolsInFOV.begin(); iter != pistolsInFOV.end(); ++iter)
 		{
 			Pistol pistol = *iter;
 			const float value = pistol.GetValue();
@@ -563,7 +601,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			}
 		}
 
-		if (bestPistolIter != foundPistols.end())
+		if (bestPistolIter != pistolsInFOV.end())
 		{
 			int previousBestPistolIndex = m_BestPistolIndex;
 			if (previousBestPistolIndex != -1)
@@ -572,49 +610,37 @@ PluginOutput TestBoxPlugin::Update(float dt)
 			}
 			m_BestPistolIndex = FirstEmptyInventorySlotID();
 			AddItemToInventory(m_BestPistolIndex, bestPistol.entityInfo, bestPistol.itemInfo);
-			foundPistols.erase(bestPistolIter);
+			pistolsInFOV.erase(bestPistolIter);
 
 			if (bestPistol.Range > m_LongestPistolRange)
 			{
 				m_LongestPistolRange = bestPistol.Range;
-				m_LongestPistolRangeIndex = m_BestPistolIndex;
+				m_LongestPistolRangeInventoryIndex = m_BestPistolIndex;
 			}
 		}
 	}
 
 	// If still not empty, we aren't picking them all up. Cache for later
-	for (size_t i = 0; i < foundPistols.size(); i++)
+	for (size_t i = 0; i < pistolsInFOV.size(); i++)
 	{
-		if (Contains(m_KnownPistols, foundPistols[i]))
+		if (Contains(m_KnownPistols, pistolsInFOV[i]))
 		{
 			m_KnownPistols[i].Fresh = true;
 		}
 		else
 		{
-			m_KnownPistols.push_back(foundPistols[i]);
+			m_KnownPistols.push_back(pistolsInFOV[i]);
 		}
 	}
 
-
-	//if (agentInfo.Stamina >= 9.9f)
-	//{
-	//	agentInfo.RunMode = true;
-	//}
-	//else if (agentInfo.Stamina <= 0.1f)
-	//{
+	if (agentInfo.Stamina >= 9.9f)
+	{
+		agentInfo.RunMode = true;
+	}
+	else if (agentInfo.Stamina <= 0.1f)
+	{
 		// Start regenerating stamina
 		agentInfo.RunMode = false;
-	//}
-
-	//if (b2Distance(m_NearestEnemy.Position, agentInfo.Position) < agentInfo.FOV_Range)
-	{
-		//DEBUG_LogMessage("flee weight: %.2f\n", m_FleeWeightNearEnemies);
-		//m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNearEnemies);
-	}
-	//else
-	{
-		//DEBUG_LogMessage("flee weight: %.2f\n", m_FleeWeightNotNearEnemies);
-		//m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNotNearEnemies);
 	}
 
 	Blackboard* pBlackboard = m_pBehaviourTree->GetBlackboard();
@@ -815,7 +841,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 				if (m_BestPistolIndex == -1)
 				{
-					m_LongestPistolRangeIndex = -1;
+					m_LongestPistolRangeInventoryIndex = -1;
 					m_LongestPistolRange = 0.0f;
 					pBlackboard->ChangeData("LongestPistolRange", 0.0f);
 				}
@@ -879,7 +905,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 					Food food;
 					ConstructFood(m_Inventory[i].EntityInfo, m_Inventory[i].ItemInfo, {}, food);
 
-					// Don't use packs that have more healing than we need
+					// Don't eat food that has more energy than we need
 					if (food.EnergyAmount <= energyNeeded &&
 						food.EnergyAmount > bestFood.EnergyAmount)
 					{
@@ -1201,6 +1227,6 @@ void TestBoxPlugin::DetermineInHouseIndex(const b2Vec2& agentPos)
 }
 
 // [Optional] For Debugging
-void TestBoxPlugin::ProcessEvents(const SDL_Event& e)
-{
-}
+//void TestBoxPlugin::ProcessEvents(const SDL_Event& e)
+//{
+//}

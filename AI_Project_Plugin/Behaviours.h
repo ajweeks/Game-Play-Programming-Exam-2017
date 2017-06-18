@@ -348,62 +348,62 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 	return Failure;
 }
 
-inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
-{
-	SteeringParams previousGoal;
-	AgentInfo* pAgentInfo = nullptr;
-	float secondsBetweenVisits;
-	std::vector<House>* pKnownHouses = nullptr;
-	bool dataAvailable =
-		pBlackboard->GetData("Goal", previousGoal) &&
-		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
-		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenVisits) &&
-		pBlackboard->GetData("KnownHouses", pKnownHouses);
-
-	if (!dataAvailable || !pAgentInfo || !pKnownHouses)
-		return Failure;
-
-	int closestHouseIndex = -1;
-	float closestHouseDistSqr = FLT_MAX;
-	size_t numKnownHouses = pKnownHouses->size();
-	for (size_t i = 0; i < numKnownHouses; i++)
-	{
-		House house = pKnownHouses->at(i);
-
-		if (house.SecondsSinceLastVisit > secondsBetweenVisits)
-		{
-			float distSqr = b2DistanceSquared(house.Info.Center, pAgentInfo->Position);
-			if (distSqr < closestHouseDistSqr)
-			{
-				closestHouseDistSqr = distSqr;
-				closestHouseIndex = i;
-			}
-		}
-	}
-
-	if (closestHouseIndex == -1 && pKnownHouses->size() > 1)
-	{
-		// No houses that we haven't visited recently
-		// Just keep searching new houses
-		return SetGoalToNextSearchPoint(pBlackboard);
-	}
-
-	if (closestHouseIndex != -1)
-	{
-		SteeringParams goal;
-		goal.Position = pKnownHouses->at(closestHouseIndex).Info.Center;
-		if (goal.Position != previousGoal.Position)
-		{
-			printf("Set goal of nearest house!\n");
-			pBlackboard->ChangeData("Goal", goal);
-			pBlackboard->ChangeData("GoalSet", true);
-		}
-		return Success;
-	}
-
-
-	return Failure;
-}
+//inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
+//{
+//	SteeringParams previousGoal;
+//	AgentInfo* pAgentInfo = nullptr;
+//	float secondsBetweenVisits;
+//	std::vector<House>* pKnownHouses = nullptr;
+//	bool dataAvailable =
+//		pBlackboard->GetData("Goal", previousGoal) &&
+//		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
+//		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenVisits) &&
+//		pBlackboard->GetData("KnownHouses", pKnownHouses);
+//
+//	if (!dataAvailable || !pAgentInfo || !pKnownHouses)
+//		return Failure;
+//
+//	int closestHouseIndex = -1;
+//	float closestHouseDistSqr = FLT_MAX;
+//	size_t numKnownHouses = pKnownHouses->size();
+//	for (size_t i = 0; i < numKnownHouses; i++)
+//	{
+//		House house = pKnownHouses->at(i);
+//
+//		if (house.SecondsSinceLastVisit > secondsBetweenVisits)
+//		{
+//			float distSqr = b2DistanceSquared(house.Info.Center, pAgentInfo->Position);
+//			if (distSqr < closestHouseDistSqr)
+//			{
+//				closestHouseDistSqr = distSqr;
+//				closestHouseIndex = i;
+//			}
+//		}
+//	}
+//
+//	if (closestHouseIndex == -1 && pKnownHouses->size() > 1)
+//	{
+//		// No houses that we haven't visited recently
+//		// Just keep searching new houses
+//		return SetGoalToNextSearchPoint(pBlackboard);
+//	}
+//
+//	if (closestHouseIndex != -1)
+//	{
+//		SteeringParams goal;
+//		goal.Position = pKnownHouses->at(closestHouseIndex).Info.Center;
+//		if (goal.Position != previousGoal.Position)
+//		{
+//			printf("Set goal of nearest house!\n");
+//			pBlackboard->ChangeData("Goal", goal);
+//			pBlackboard->ChangeData("GoalSet", true);
+//		}
+//		return Success;
+//	}
+//
+//
+//	return Failure;
+//}
 
 inline BehaviourState SetGoalToNearestUnexploredHouse(Blackboard* pBlackboard)
 {

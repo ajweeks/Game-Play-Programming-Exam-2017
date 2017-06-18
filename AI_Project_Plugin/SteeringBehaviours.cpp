@@ -83,15 +83,6 @@ namespace SteeringBehaviours
 		auto newTarget = SteeringParams(agentInfo.Position + offset + circleOffset);
 		Seek::m_pTargetRef = &newTarget;
 
-		//DEBUG RENDERING
-		//if (m_pContext)
-		//{
-		//	auto pos = agentInfo.Position;
-		//	m_pContext->renderer->DrawSegment(pos, pos + offset, { 0,0,1 });
-		//	m_pContext->renderer->DrawCircle(pos + offset, m_Radius, { 0,0,1 }, -0.7f);
-		//	m_pContext->renderer->DrawSolidCircle(pos + offset + circleOffset, 0.1f, { 0,0 }, { 0, 1, 0 }, -0.75f);
-		//}
-
 		return Seek::CalculateSteering(deltaT, agentInfo);
 	}
 

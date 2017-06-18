@@ -10,8 +10,8 @@ extern "C"
 	int RunFramework(HMODULE module, std::string levelPath = {});
 	__declspec(dllexport) int RunFrameworkDLL(HMODULE module)
 	{
-		//return RunFramework(module, "data/LevelOne.gppl");
-		return RunFramework(module, "data/LevelTwo.gppl");
+		return RunFramework(module, "data/LevelOne.gppl");
+		//return RunFramework(module, "data/LevelTwo.gppl");
 	}
 
 	__declspec(dllexport) IBehaviourPlugin* Create()
