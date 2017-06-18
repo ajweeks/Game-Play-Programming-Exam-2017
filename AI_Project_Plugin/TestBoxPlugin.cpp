@@ -86,18 +86,18 @@ void TestBoxPlugin::Start()
 	m_EmptyTargetEnemy = {};
 	m_EmptyTargetEnemy.enemyInfo.EnemyHash = -1;
 	
-	//Create blackboard
 	auto pBlackboard = new Blackboard;
 	pBlackboard->AddData("AgentInfo", &agentInfo);
 	pBlackboard->AddData("Goal", m_Goal);
-	pBlackboard->AddData("NextNavMeshGoal", m_NextNavMeshGoal);
 	pBlackboard->AddData("GoalSet", m_GoalSet);
+	pBlackboard->AddData("NextNavMeshGoal", m_NextNavMeshGoal);
 	pBlackboard->AddData("CurrentBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(m_CurrentSteeringBehaviour));
+	pBlackboard->AddData("SearchPoints", &m_SearchPoints);
+	pBlackboard->AddData("SearchPointIndex", m_SearchPointIndex);
+	pBlackboard->AddData("TargetEnemy", m_EmptyTargetEnemy);
 	pBlackboard->AddData("Inventory", &m_Inventory);
 	pBlackboard->AddData("MaxHealth", agentInfo.Health);
 	pBlackboard->AddData("MaxEnergy", agentInfo.Energy);
-	pBlackboard->AddData("LongestPistolRange", 0.0f);
-	pBlackboard->AddData("TargetEnemy", m_EmptyTargetEnemy);
 	pBlackboard->AddData("KnownItems", &m_KnownItems);
 	pBlackboard->AddData("KnownHealthPacks", &m_KnownHealthPacks);
 	pBlackboard->AddData("KnownFoodItems", &m_KnownFoodItems);
@@ -106,15 +106,10 @@ void TestBoxPlugin::Start()
 	pBlackboard->AddData("KnownHouses", &m_KnownHouses);
 	pBlackboard->AddData("NextHouseIndex", m_NextHouseIndex);
 	pBlackboard->AddData("SecondsBetweenHouseRevisits", m_SecondsBetweenHouseRevisits);
-	pBlackboard->AddData("InsideHouse", false);
-	pBlackboard->AddData("WorldMinCoords", minWorldCoords);
-	pBlackboard->AddData("WorldMaxCoords", maxWorldCoords);
-
-	pBlackboard->AddData("SearchPoints", &m_SearchPoints);
-	pBlackboard->AddData("SearchPointIndex", m_SearchPointIndex);
+	pBlackboard->AddData("InsideHouseIndex", m_InHouseIndex);
+	pBlackboard->AddData("LongestPistolRange", 0.0f);
 
 	// Flags that behaviours can set to send info back to this class
-	pBlackboard->AddData("ShootPistol", false);
 	pBlackboard->AddData("UseHealthItem", false);
 	pBlackboard->AddData("UseFoodItem", false);
 
@@ -145,17 +140,17 @@ void TestBoxPlugin::Start()
 			new BehaviourConditional(HasHealthItem),
 			new BehaviourAction(UseHealthItem)
 		}),
-		new BehaviourSequence // Find ITEMS
+		new BehaviourSequence // Grab nearby ITEMS
 		({
 			new BehaviourConditional(HaveInventorySpace),
 			new BehaviourConditional(KnowOfItemsOnGround),
-			new BehaviourAction(SetNearestItemAsGoal)
+			new BehaviourAction(SetNearestItemInRangeAsGoal) // TODO: compare to this: SetNearestItemAsGoal
 		}),
 		new BehaviourSequence // Find ITEMS (even with no inventory space, we can trade things out)
 		({
 			new BehaviourConditional(LowEnergyOrHealth),
 			new BehaviourConditional(KnowOfItemsOnGround),
-			new BehaviourAction(SetNearestItemAsGoal)
+			new BehaviourAction(SetNearestItemInRangeAsGoal) // TODO: compare to this: SetNearestItemAsGoal
 		}),
 		new BehaviourSequence // Explore unexplored HOUSES
 		({
@@ -176,7 +171,17 @@ void TestBoxPlugin::Start()
 		}),
 		new BehaviourConditionalInverse(MapSearchedEntirely), // Don't go any further if map hasn't been fully searched
 		new BehaviourConditional(IsGoalSet), // Don't go any further if a goal is set
-		new BehaviourAction(SetGoalToNextHouse)
+		new BehaviourSequence // Increment NEXT HOUSE index
+		({
+			new BehaviourConditional(CurrentlyInsideNextHouse),
+			new BehaviourAction(IncrementNextHouseIndex),
+			new BehaviourAction(SetGoalToNextHouse)
+		}),
+		new BehaviourSequence // If there's no goal set, move on to the next house
+		({
+			new BehaviourConditionalInverse(IsGoalSet),
+			new BehaviourAction(SetGoalToNextHouse)
+		})
 	}));
 
 	m_StartingHealth = agentInfo.Health;
@@ -412,7 +417,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		m_pBlendedBehaviour->SetBehaviourWeight(m_FleeBehaviourWeightPairIndex, m_FleeWeightNotNearEnemies);
 	}
 
-	// Add new found houses to cache
+	// Add new newly found houses to cache
 	std::vector<HouseInfo> housesInFOV = FOV_GetHouses();
 	for (size_t i = 0; i < housesInFOV.size(); i++)
 	{
@@ -451,27 +456,24 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				if (firstEmptyInventorySlot == -1)
 				{
 					// Always drop other items for food - it's that hard to come by
-					int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
+					const int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
+					const int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
 					if (pistolSlotIndex != -1)
 					{
 						DEBUG_LogMessage("Dropping pistol to make room for food");
 						RemoveItemFromInventory(pistolSlotIndex);
 						firstEmptyInventorySlot = pistolSlotIndex;
 					}
+					else if (healthSlotIndex != -1)
+					{
+						DEBUG_LogMessage("Dropping health pack to make room for food");
+						RemoveItemFromInventory(healthSlotIndex);
+						firstEmptyInventorySlot = healthSlotIndex;
+					}
 					else
 					{
-						int healthSlotIndex = InventoryFirstSlotWithItemType(eItemType::HEALTH);
-						if (healthSlotIndex != -1)
-						{
-							DEBUG_LogMessage("Dropping health pack to make room for food");
-							RemoveItemFromInventory(healthSlotIndex);
-							firstEmptyInventorySlot = healthSlotIndex;
-						}
-						else
-						{
-							assert(false); // If our inventory doesn't have any food, or pistols, it better have health
-							++iter;
-						}
+						DEBUG_LogMessage("# # # ERROR: Unhandled item type in inventory");
+						++iter;
 					}
 				}
 
@@ -518,26 +520,23 @@ PluginOutput TestBoxPlugin::Update(float dt)
 					if (healthSlotIndex == -1 && agentInfo.Health < m_StartingHealth)
 					{
 						const int pistolSlotIndex = InventoryFirstSlotWithItemType(eItemType::PISTOL);
+						const int foodSlotIndex = InventoryFirstSlotWithItemType(eItemType::FOOD);
 						if (pistolSlotIndex != -1)
 						{
 							DEBUG_LogMessage("Dropping pistol to make room for health");
 							RemoveItemFromInventory(pistolSlotIndex);
 							firstEmptyInventorySlot = pistolSlotIndex;
 						}
+						else if (foodSlotIndex != -1)
+						{
+							DEBUG_LogMessage("Dropping food to make room for health");
+							RemoveItemFromInventory(foodSlotIndex);
+							firstEmptyInventorySlot = foodSlotIndex;
+						}
 						else
 						{
-							const int foodSlotIndex = InventoryFirstSlotWithItemType(eItemType::FOOD);
-							if (foodSlotIndex != -1)
-							{
-								DEBUG_LogMessage("Dropping food to make room for health");
-								RemoveItemFromInventory(foodSlotIndex);
-								firstEmptyInventorySlot = foodSlotIndex;
-							}
-							else
-							{
-								assert(false); // If our inventory doesn't have any health, or pistols, it better have food
-								++iter;
-							}
+							DEBUG_LogMessage("# # # ERROR: Unhandled item type in inventory");
+							++iter;
 						}
 					}
 					else
@@ -653,7 +652,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	pBlackboard->ChangeData("KnownPistols", &m_KnownPistols);
 	pBlackboard->ChangeData("KnownEnemies", &m_KnownEnemies);
 	pBlackboard->ChangeData("KnownHouses", &m_KnownHouses);
-	pBlackboard->ChangeData("InsideHouse", m_InHouseIndex != -1);
+	pBlackboard->ChangeData("InsideHouseIndex", m_InHouseIndex);
 	pBlackboard->ChangeData("TargetEnemy", m_EmptyTargetEnemy);
 
 	m_pBehaviourTree->Update();
@@ -773,7 +772,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		{
 			DEBUG_LogMessage("----Shooting pistol\n");
 			UseItemInInventory(m_BestPistolIndex);
-			pBlackboard->ChangeData("ShootPistol", false);
 
 			// Check if you killed em (true unless they are still in front of us)
 			bool enemyKilled = true;

@@ -9,7 +9,6 @@ namespace CombinedSB
 {
 	class BlendedSteering;
 }
-
 class BehaviourTree;
 
 class TestBoxPlugin : public IBehaviourPlugin

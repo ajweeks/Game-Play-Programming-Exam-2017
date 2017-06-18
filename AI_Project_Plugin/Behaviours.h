@@ -200,6 +200,156 @@ inline bool KnowOfItemsOnGround(Blackboard* pBlackboard)
 			!knownPistols->empty());
 }
 
+inline BehaviourState SetNearestItemInRangeAsGoal(Blackboard* pBlackboard)
+{
+	SteeringParams previousGoal;
+	std::vector<Item>* inventory;
+	std::vector<EntityInfo>* knownItems = nullptr;
+	std::vector<HealthPack>* knownHealthPacks = nullptr;
+	std::vector<Food>* knownFoodItems = nullptr;
+	std::vector<Pistol>* knownPistols = nullptr;
+	AgentInfo* pAgentInfo = nullptr;
+	float maxHealth = 0;
+	float maxEnergy = 0;
+	bool dataAvailable =
+		pBlackboard->GetData("Goal", previousGoal) &&
+		pBlackboard->GetData("Inventory", inventory) &&
+		pBlackboard->GetData("KnownItems", knownItems) &&
+		pBlackboard->GetData("KnownHealthPacks", knownHealthPacks) &&
+		pBlackboard->GetData("KnownFoodItems", knownFoodItems) &&
+		pBlackboard->GetData("KnownPistols", knownPistols) &&
+		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
+		pBlackboard->GetData("MaxHealth", maxHealth) &&
+		pBlackboard->GetData("MaxEnergy", maxEnergy);
+
+
+	if (!dataAvailable || !pAgentInfo)
+		return Failure;
+
+	float maxRange = pAgentInfo->FOV_Range * 3.0f;
+
+	float neededHealth = maxHealth - pAgentInfo->Health;
+	float neededEnergy = maxEnergy - pAgentInfo->Energy;
+
+	float nearestHealthPackDist = maxRange;
+	int nearestHealthPackIndex = -1;
+	for (size_t i = 0; i < knownHealthPacks->size(); i++)
+	{
+		const float dist = b2Distance(knownHealthPacks->at(i).Position, pAgentInfo->Position);
+		if (dist < nearestHealthPackDist)
+		{
+			nearestHealthPackDist = dist;
+			nearestHealthPackIndex = i;
+		}
+	}
+
+	float nearestFoodItemDist = maxRange;
+	int nearestFoodItemIndex = -1;
+	for (size_t i = 0; i < knownFoodItems->size(); i++)
+	{
+		const float dist = b2Distance(knownFoodItems->at(i).Position, pAgentInfo->Position);
+		if (dist < nearestFoodItemDist)
+		{
+			nearestFoodItemDist = dist;
+			nearestFoodItemIndex = i;
+		}
+	}
+
+	float nearestPistolDist = maxRange;
+	int nearestPistolIndex = -1;
+	for (size_t i = 0; i < knownPistols->size(); i++)
+	{
+		const float dist = b2Distance(knownPistols->at(i).Position, pAgentInfo->Position);
+		if (dist < nearestPistolDist)
+		{
+			nearestPistolDist = dist;
+			nearestPistolIndex = i;
+		}
+	}
+
+	// The items we haven't gotten close enough to to find out what they are
+	float nearestItemDist = maxRange;
+	int nearestItemIndex = -1;
+	for (size_t i = 0; i < knownItems->size(); i++)
+	{
+		const float dist = b2Distance(knownItems->at(i).Position, pAgentInfo->Position);
+		if (dist < nearestItemDist)
+		{
+			nearestItemDist = dist;
+			nearestItemIndex = i;
+		}
+	}
+
+	// Prioritize FOOD
+	if (nearestFoodItemIndex != -1)
+	{
+		Food nearestFoodItem = knownFoodItems->at(nearestFoodItemIndex);
+		if (nearestFoodItem.EnergyAmount >= neededEnergy ||
+			nearestPistolIndex == -1)
+		{
+			SteeringParams goal = {};
+			goal.Position = nearestFoodItem.Position;
+			if (previousGoal.Position != goal.Position)
+			{
+				printf("Set goal of food\n");
+				pBlackboard->ChangeData("Goal", goal);
+				pBlackboard->ChangeData("GoalSet", true);
+			}
+			return Success;
+		}
+	}
+	// Then HEALTH
+	if (nearestHealthPackIndex != -1)
+	{
+		HealthPack nearestHealthPack = knownHealthPacks->at(nearestHealthPackIndex);
+		if (neededHealth >= nearestHealthPack.HealingAmount ||
+			(nearestFoodItemIndex == -1 && nearestPistolIndex == -1))
+		{
+			SteeringParams goal = {};
+			goal.Position = nearestHealthPack.Position;
+			if (previousGoal.Position != goal.Position)
+			{
+				printf("Set goal of health\n");
+				pBlackboard->ChangeData("Goal", goal);
+				pBlackboard->ChangeData("GoalSet", true);
+			}
+			return Success;
+		}
+	}
+
+	// Then PISTOLS
+	if (nearestPistolIndex != -1)
+	{
+		Pistol nearestPistol = knownPistols->at(nearestFoodItemIndex);
+		SteeringParams goal = {};
+		goal.Position = nearestPistol.Position;
+		if (previousGoal.Position != goal.Position)
+		{
+			printf("Set goal of pistol\n");
+			pBlackboard->ChangeData("Goal", goal);
+			pBlackboard->ChangeData("GoalSet", true);
+		}
+		return Success;
+	}
+
+	// Then ITEMS we haven't inspected yet (could be garbage)
+	if (nearestItemIndex != -1)
+	{
+		EntityInfo nearestItem = knownItems->at(nearestItemIndex);
+		SteeringParams goal = {};
+		goal.Position = nearestItem.Position;
+		if (previousGoal.Position != goal.Position)
+		{
+			printf("Set goal of nearest item!\n");
+			pBlackboard->ChangeData("Goal", goal);
+			pBlackboard->ChangeData("GoalSet", true);
+		}
+		return Success;
+	}
+
+	return Failure;
+}
+
 inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 {
 	SteeringParams previousGoal;
@@ -348,63 +498,6 @@ inline BehaviourState SetNearestItemAsGoal(Blackboard* pBlackboard)
 	return Failure;
 }
 
-//inline BehaviourState SetGoalToNearestHouse(Blackboard* pBlackboard)
-//{
-//	SteeringParams previousGoal;
-//	AgentInfo* pAgentInfo = nullptr;
-//	float secondsBetweenVisits;
-//	std::vector<House>* pKnownHouses = nullptr;
-//	bool dataAvailable =
-//		pBlackboard->GetData("Goal", previousGoal) &&
-//		pBlackboard->GetData("AgentInfo", pAgentInfo) &&
-//		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenVisits) &&
-//		pBlackboard->GetData("KnownHouses", pKnownHouses);
-//
-//	if (!dataAvailable || !pAgentInfo || !pKnownHouses)
-//		return Failure;
-//
-//	int closestHouseIndex = -1;
-//	float closestHouseDistSqr = FLT_MAX;
-//	size_t numKnownHouses = pKnownHouses->size();
-//	for (size_t i = 0; i < numKnownHouses; i++)
-//	{
-//		House house = pKnownHouses->at(i);
-//
-//		if (house.SecondsSinceLastVisit > secondsBetweenVisits)
-//		{
-//			float distSqr = b2DistanceSquared(house.Info.Center, pAgentInfo->Position);
-//			if (distSqr < closestHouseDistSqr)
-//			{
-//				closestHouseDistSqr = distSqr;
-//				closestHouseIndex = i;
-//			}
-//		}
-//	}
-//
-//	if (closestHouseIndex == -1 && pKnownHouses->size() > 1)
-//	{
-//		// No houses that we haven't visited recently
-//		// Just keep searching new houses
-//		return SetGoalToNextSearchPoint(pBlackboard);
-//	}
-//
-//	if (closestHouseIndex != -1)
-//	{
-//		SteeringParams goal;
-//		goal.Position = pKnownHouses->at(closestHouseIndex).Info.Center;
-//		if (goal.Position != previousGoal.Position)
-//		{
-//			printf("Set goal of nearest house!\n");
-//			pBlackboard->ChangeData("Goal", goal);
-//			pBlackboard->ChangeData("GoalSet", true);
-//		}
-//		return Success;
-//	}
-//
-//
-//	return Failure;
-//}
-
 inline BehaviourState SetGoalToNearestUnexploredHouse(Blackboard* pBlackboard)
 {
 	SteeringParams previousGoal;
@@ -496,51 +589,45 @@ inline bool KnownHouseNotRecentlyVisited(Blackboard* pBlackboard)
 	return false;
 }
 
-inline bool CurrentlyInsideHouse(Blackboard* pBlackboard)
+inline bool CurrentlyInsideNextHouse(Blackboard* pBlackboard)
 {
-	bool insideHouse;
-	bool dataAvailable = pBlackboard->GetData("InsideHouse", insideHouse);
+	int houseIndex;
+	int nextHouseIndex;
+	bool dataAvailable =
+		pBlackboard->GetData("InsideHouseIndex", houseIndex) &&
+		pBlackboard->GetData("NextHouseIndex", nextHouseIndex);
 
 	if (!dataAvailable)
 		return false;
 
-	return insideHouse;
+	bool insideNextHouse = houseIndex != -1 && houseIndex == nextHouseIndex;
+	
+	return insideNextHouse;
 }
 
-inline BehaviourState SetGoalToClosestHouseNotRecentlyVisited(Blackboard* pBlackboard)
+inline BehaviourState IncrementNextHouseIndex(Blackboard* pBlackboard)
 {
-	float secondsBetweenRevisits;
-	std::vector<House>* knownHouses = nullptr;
-	float maxHealth = 0;
+	AgentInfo* pAgentInfo = nullptr;
+	std::vector<House>* knownHouses;
+	int nextHouseIndex;
 	bool dataAvailable =
-		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenRevisits) &&
-		pBlackboard->GetData("KnownHouses", knownHouses);
+		pBlackboard->GetData("KnownHouses", knownHouses) &&
+		pBlackboard->GetData("NextHouseIndex", nextHouseIndex) &&
+		pBlackboard->GetData("AgentInfo", pAgentInfo);
 
-	if (!dataAvailable)
+	if (!dataAvailable || knownHouses->empty())
 		return Failure;
 
-	House closestHouse;
-	int closestHouseIndex = -1;
-	for (size_t i = 0; i < knownHouses->size(); i++)
+	if (knownHouses->size() == 1 && pAgentInfo->IsInHouse)
 	{
-		if (knownHouses->at(i).SecondsSinceLastVisit >= secondsBetweenRevisits)
-		{
-			closestHouse = knownHouses->at(i);
-			closestHouseIndex = i;
-		}
+		return Failure;
 	}
 
-	if (closestHouseIndex != -1)
-	{
-		printf("Set goal of house\n");
-		SteeringParams goal = {};
-		goal.Position = closestHouse.Info.Center;
-		pBlackboard->ChangeData("Goal", goal);
-		pBlackboard->ChangeData("GoalSet", true);
-		return Success;
-	}
+	int newNextHouseIndex = (nextHouseIndex + 1) % knownHouses->size();
+	pBlackboard->ChangeData("NextHouseIndex", newNextHouseIndex);
+	printf("Incremented next house, index to: %i/%i\n", newNextHouseIndex, knownHouses->size());
 
-	return Failure;
+	return Success;
 }
 
 inline BehaviourState SetGoalToNextHouse(Blackboard* pBlackboard)
@@ -561,18 +648,50 @@ inline BehaviourState SetGoalToNextHouse(Blackboard* pBlackboard)
 		return Failure;
 	}
 
-	int newNextHouseIndex = (nextHouseIndex + 1) % knownHouses->size();
-
-	pBlackboard->ChangeData("NextHouseIndex", newNextHouseIndex);
-
-	printf("Set goal of next house, index %i/%i\n", newNextHouseIndex, knownHouses->size());
+	printf("Set goal to next house, index %i/%i\n", nextHouseIndex, knownHouses->size());
 	SteeringParams goal;
-	goal.Position = knownHouses->at(newNextHouseIndex).Info.Center;
+	goal.Position = knownHouses->at(nextHouseIndex).Info.Center;
 	pBlackboard->ChangeData("Goal", goal);
 	pBlackboard->ChangeData("GoalSet", true);
 
 	return Success;
 }
+
+//inline BehaviourState SetGoalToClosestHouseNotRecentlyVisited(Blackboard* pBlackboard)
+//{
+//	float secondsBetweenRevisits;
+//	std::vector<House>* knownHouses = nullptr;
+//	float maxHealth = 0;
+//	bool dataAvailable =
+//		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenRevisits) &&
+//		pBlackboard->GetData("KnownHouses", knownHouses);
+//
+//	if (!dataAvailable)
+//		return Failure;
+//
+//	House closestHouse;
+//	int closestHouseIndex = -1;
+//	for (size_t i = 0; i < knownHouses->size(); i++)
+//	{
+//		if (knownHouses->at(i).SecondsSinceLastVisit >= secondsBetweenRevisits)
+//		{
+//			closestHouse = knownHouses->at(i);
+//			closestHouseIndex = i;
+//		}
+//	}
+//
+//	if (closestHouseIndex != -1)
+//	{
+//		printf("Set goal of house\n");
+//		SteeringParams goal = {};
+//		goal.Position = closestHouse.Info.Center;
+//		pBlackboard->ChangeData("Goal", goal);
+//		pBlackboard->ChangeData("GoalSet", true);
+//		return Success;
+//	}
+//
+//	return Failure;
+//}
 
 // Health
 inline bool NotMaxHealth(Blackboard* pBlackboard)
@@ -906,17 +1025,9 @@ inline BehaviourState AimAtNearestEnemyInFOV(Blackboard* pBlackboard)
 	Enemy nearestEnemy;
 	if (NearestEnemyInFOV(knownEnemies, pAgentInfo, nearestEnemy, dist))
 	{
-		printf("Aiming at nearest enemy! (enemy hash %i)\n", nearestEnemy.enemyInfo.EnemyHash);
 		pBlackboard->ChangeData("TargetEnemy", nearestEnemy);
 		return Failure;
 	}
 
 	return Failure;
 }
-
-//inline BehaviourState ShootPistol(Blackboard* pBlackboard)
-//{
-//	pBlackboard->ChangeData("ShootPistol", true);
-//
-//	return Failure; // Keep executing other behaviours
-//}
