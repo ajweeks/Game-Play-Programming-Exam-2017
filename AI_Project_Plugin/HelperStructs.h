@@ -532,9 +532,9 @@ struct GameDebugParams //Debuggin Purposes only (Ignored during release build)
 template<class T>
 bool Contains(const std::vector<T>& vec, const T& t)
 {
-	for (size_t i = 0; i < vec.size(); i++)
+	for (auto iter = vec.begin(); iter != vec.end(); ++iter)
 	{
-		if (vec[i] == t) return true;
+		if (*iter == t) return true;
 	}
 
 	return false;

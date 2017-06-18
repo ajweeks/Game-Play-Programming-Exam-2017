@@ -25,19 +25,22 @@ TestBoxPlugin::~TestBoxPlugin()
 
 void TestBoxPlugin::Start()
 {
-	m_Inventory.resize(INVENTORY_GetCapacity());
-	for (size_t i = 0; i < m_Inventory.size(); i++)
-	{
-		m_Inventory[i].ItemInfo = {};
-		m_Inventory[i].Valid = false;
-	}
-
 	AgentInfo agentInfo = AGENT_GetInfo(); //Contains all Agent Parameters, retrieved by copy!
 	WorldInfo worldInfo = WORLD_GetInfo(); //Contains the location of the center of the world and the dimensions
+
+	m_Inventory.resize(INVENTORY_GetCapacity());
+
+	m_StartingHealth = agentInfo.Health;
+	m_StartingEnergy = agentInfo.Energy;
+	m_StartingStamina = agentInfo.Stamina;
+
+	m_SecondsElapsed = 0.0f;
+	m_SecondsSinceNavMeshTargetUpdate = 0.0f;
 
 	const b2Vec2 minWorldCoords = worldInfo.Center - worldInfo.Dimensions / 2.0f;
 	const b2Vec2 maxWorldCoords = worldInfo.Center + worldInfo.Dimensions / 2.0f;
 
+	// Generate search points
 	int xCount = 3;
 	int yCount = 3;
 	float edgeBuffer = 40.0f;
@@ -45,7 +48,6 @@ void TestBoxPlugin::Start()
 	float searchPointOffsetY = minWorldCoords.y + edgeBuffer;
 	float adjustedWorldWidth = (worldInfo.Dimensions.x - edgeBuffer * 2.0f) / (float)(xCount - 1);
 	float adjustedWorldHeight = (worldInfo.Dimensions.y - edgeBuffer * 2.0f) / (float)(yCount - 1);
-	// Generate initial search points
 	for (int i = 0; i < xCount; i++)
 	{
 		for (int j = 0; j < yCount; j++)
@@ -62,26 +64,21 @@ void TestBoxPlugin::Start()
 	m_GoalSet = true;
 	m_NextNavMeshGoal = NAVMESH_GetClosestPathPoint(m_Goal.Position);
 
-	//Create behaviours
+	// Steering behaviours
 	auto pSeekBehaviour = new SteeringBehaviours::Seek();
 	pSeekBehaviour->SetTarget(&m_NextNavMeshGoal);
 	m_BehaviourVec.push_back(pSeekBehaviour);
-	//auto pWanderBehaviour = new SteeringBehaviours::Wander();
-	//m_BehaviourVec.push_back(pWanderBehaviour);
 	auto pFleeBehaviour = new SteeringBehaviours::Flee();
 	pFleeBehaviour->SetTarget(&m_AverageNearbyEnemy);
 	m_BehaviourVec.push_back(pFleeBehaviour);
 
 	std::vector<CombinedSB::BehaviourAndWeight> behavioursAndWeights;
-	//behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pWanderBehaviour, 0.0f));
 	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pSeekBehaviour, 1.0f));
 	behavioursAndWeights.push_back(CombinedSB::BehaviourAndWeight(pFleeBehaviour, m_FleeWeightNotNearEnemies));
 	m_FleeBehaviourWeightPairIndex = behavioursAndWeights.size() - 1;
 	m_pBlendedBehaviour = new CombinedSB::BlendedSteering(behavioursAndWeights);
 	
 	m_BehaviourVec.push_back(m_pBlendedBehaviour);
-
-	m_CurrentSteeringBehaviour = m_pBlendedBehaviour;
 
 	m_EmptyTargetEnemy = {};
 	m_EmptyTargetEnemy.enemyInfo.EnemyHash = -1;
@@ -91,7 +88,6 @@ void TestBoxPlugin::Start()
 	pBlackboard->AddData("Goal", m_Goal);
 	pBlackboard->AddData("GoalSet", m_GoalSet);
 	pBlackboard->AddData("NextNavMeshGoal", m_NextNavMeshGoal);
-	pBlackboard->AddData("CurrentBehaviour", static_cast<SteeringBehaviours::ISteeringBehaviour*>(m_CurrentSteeringBehaviour));
 	pBlackboard->AddData("SearchPoints", &m_SearchPoints);
 	pBlackboard->AddData("SearchPointIndex", m_SearchPointIndex);
 	pBlackboard->AddData("TargetEnemy", m_EmptyTargetEnemy);
@@ -144,13 +140,13 @@ void TestBoxPlugin::Start()
 		({
 			new BehaviourConditional(HaveInventorySpace),
 			new BehaviourConditional(KnowOfItemsOnGround),
-			new BehaviourAction(SetNearestItemInRangeAsGoal) // TODO: compare to this: SetNearestItemAsGoal
+			new BehaviourAction(SetNearestItemInRangeAsGoal)
 		}),
 		new BehaviourSequence // Find ITEMS (even with no inventory space, we can trade things out)
 		({
 			new BehaviourConditional(LowEnergyOrHealth),
 			new BehaviourConditional(KnowOfItemsOnGround),
-			new BehaviourAction(SetNearestItemInRangeAsGoal) // TODO: compare to this: SetNearestItemAsGoal
+			new BehaviourAction(SetNearestItemInRangeAsGoal)
 		}),
 		new BehaviourSequence // Explore unexplored HOUSES
 		({
@@ -177,29 +173,19 @@ void TestBoxPlugin::Start()
 			new BehaviourAction(IncrementNextHouseIndex),
 			new BehaviourAction(SetGoalToNextHouse)
 		}),
-		new BehaviourSequence // If there's no goal set, move on to the next house
+		new BehaviourSequence // If there's no goal set, move on to the next house (there should always be a goal set)
 		({
 			new BehaviourConditionalInverse(IsGoalSet),
 			new BehaviourAction(SetGoalToNextHouse)
 		})
 	}));
-
-	m_StartingHealth = agentInfo.Health;
-	m_StartingEnergy = agentInfo.Energy;
-
-	m_SecondsElapsed = 0.0f;
-	m_SecondsSinceNavMeshTargetUpdate = 0.0f;
 }
 
 PluginOutput TestBoxPlugin::Update(float dt)
 {
 	m_SecondsElapsed += dt;
 
-	WorldInfo worldInfo = WORLD_GetInfo(); //Contains the location of the center of the world and the dimensions
-	AgentInfo agentInfo = AGENT_GetInfo(); //Contains all Agent Parameters, retrieved by copy!
-
-	const b2Vec2 minWorldCoords = worldInfo.Center - worldInfo.Dimensions / 2.0f;
-	const b2Vec2 maxWorldCoords = worldInfo.Center + worldInfo.Dimensions / 2.0f;
+	AgentInfo agentInfo = AGENT_GetInfo(); // Contains all Agent Parameters, retrieved by copy!
 
 	if (!m_KnownEnemies.empty())
 	{
@@ -236,8 +222,11 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		{
 		case eEntityType::ITEM:
 		{
-			bool addedToList = false; // If this isn't set to true, this item is added to our list of unknown items
-			if (b2Distance(entityInfo.Position, agentInfo.Position) < (agentInfo.GrabRange * 0.75f)) // Use smaller grab range because sometimes it doesn't think you're in it
+			bool addedToList = false; // If this isn't set to true, this item will be added to our list of unknown items
+
+			// Use smaller grab range because sometimes it doesn't think you're in it
+			const float grabRangeSqr = (agentInfo.GrabRange * 0.75f) * (agentInfo.GrabRange * 0.75f);
+			if (b2DistanceSquared(entityInfo.Position, agentInfo.Position) < grabRangeSqr)
 			{
 				ItemInfo itemInfo = {};
 				ITEM_Grab(entityInfo, itemInfo);
@@ -248,6 +237,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				{
 					Pistol pistol = {};
 					ConstructPistol(entityInfo, itemInfo, entityInfo.Position, pistol);
+
 					if (pistol.Ammo > 0 && pistol.DPS > 0 && pistol.Range > 0)
 					{
 						if (!Contains(pistolsInFOV, pistol))
@@ -271,6 +261,7 @@ PluginOutput TestBoxPlugin::Update(float dt)
 				{
 					HealthPack healthPack = {};
 					ConstructHealthPack(entityInfo, itemInfo, entityInfo.Position, healthPack);
+
 					if (healthPack.HealingAmount > 0)
 					{
 						if (!Contains(healthPacksInFOV, healthPack))
@@ -333,10 +324,9 @@ PluginOutput TestBoxPlugin::Update(float dt)
 					// We added this to our list before we knew it was garbage
 					// Remove it
 					RemoveFromKnownItems(entityInfo); 
-
 				} break;
 				default:
-					DEBUG_LogMessage("Unhandled item type: " + std::to_string(itemInfo.Type) + "\n");
+					DEBUG_LogMessage("# # # ERROR: Unhandled item type: " + std::to_string(itemInfo.Type) + "\n");
 					break;
 				}
 			}
@@ -383,9 +373,9 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		}
 	}
 
-	m_AverageNearbyEnemy.Position = b2Vec2_zero;
 	if (!m_KnownEnemies.empty())
 	{
+		m_AverageNearbyEnemy.Position = b2Vec2_zero;
 		int nearbyEnemyCount = 0;
 		for (auto iter = m_KnownEnemies.begin(); iter != m_KnownEnemies.end(); ++iter)
 		{
@@ -435,7 +425,6 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	{
 		m_KnownHouses[m_InHouseIndex].SecondsSinceLastVisit = 0.0f;
 	}
-
 	for (size_t i = 0; i < m_KnownHouses.size(); i++)
 	{
 		if (m_InHouseIndex != i)
@@ -632,16 +621,18 @@ PluginOutput TestBoxPlugin::Update(float dt)
 		}
 	}
 
-	if (agentInfo.Stamina >= 9.9f)
+	// Run as soon as we regain all stamina or we are bitten
+	if (agentInfo.Stamina >= (m_StartingStamina - 0.1f) || 
+		(agentInfo.Bitten && agentInfo.Stamina > 1.0f))
 	{
 		agentInfo.RunMode = true;
 	}
 	else if (agentInfo.Stamina <= 0.1f)
 	{
-		// Start regenerating stamina
 		agentInfo.RunMode = false;
 	}
 
+	// Update blackboard values
 	Blackboard* pBlackboard = m_pBehaviourTree->GetBlackboard();
 	pBlackboard->ChangeData("AgentInfo", &agentInfo);
 	pBlackboard->ChangeData("Inventory", &m_Inventory);
@@ -655,11 +646,13 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	pBlackboard->ChangeData("InsideHouseIndex", m_InHouseIndex);
 	pBlackboard->ChangeData("TargetEnemy", m_EmptyTargetEnemy);
 
+
 	m_pBehaviourTree->Update();
 
+
+	// Retrieve values from blackboard
 	bool goalWasSet = m_GoalSet;
 	pBlackboard->GetData("GoalSet", m_GoalSet);
-
 
 	m_SecondsSinceNavMeshTargetUpdate += dt;
 
@@ -756,17 +749,20 @@ PluginOutput TestBoxPlugin::Update(float dt)
 	{
 		overrideAutoOrient = false;
 
-		b2Vec2 dPos = targetEnemy.Position - agentInfo.Position;
+		const b2Vec2 dPos = targetEnemy.Position - agentInfo.Position;
+		const float dist = b2Distance(agentInfo.Position, targetEnemy.Position);
 
-		float currOrientation = agentInfo.Orientation;
-		float targetOrientation = GetOrientationFromVelocity(dPos);
-		angularSteering = targetEnemy.Orientation - currOrientation;
+		const float currOrientation = agentInfo.Orientation;
+		const float targetOrientation = GetOrientationFromVelocity(dPos);
+		angularSteering = targetOrientation - currOrientation;
 
 		bool shootPistol = false;
 
-		float dist = b2Distance(agentInfo.Position, targetEnemy.Position);
-		b2Vec2 forward = b2Vec2(cos(agentInfo.Orientation), sin(agentInfo.Orientation));
-		b2Vec2 testPoint = agentInfo.Position + forward * dist; // Slightly fishy calculation, but works well
+		const b2Vec2 forward = b2Vec2(cos(agentInfo.Orientation), sin(agentInfo.Orientation));
+		const b2Vec2 testPoint = agentInfo.Position + forward * dist; // Slightly fishy calculation, but works fine
+
+		float distFromTarget = b2Distance(testPoint, targetEnemy.Position);
+		if (distFromTarget < 2.0f) shootPistol = true;
 
 		if (shootPistol)
 		{
@@ -878,9 +874,9 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 			if (bestHealthPackIndex != -1)
 			{
-				DEBUG_LogMessage("----Using health pack\n");
+				DEBUG_LogMessage("----Using health pack (%i)\n", bestHealthPack.HealingAmount);
 				UseItemInInventory(bestHealthPackIndex);
-				RemoveItemFromInventory(bestHealthPackIndex); // One time use item
+				RemoveItemFromInventory(bestHealthPackIndex);
 			}
 		}
 	}
@@ -915,16 +911,15 @@ PluginOutput TestBoxPlugin::Update(float dt)
 
 			if (bestFoodIndex != -1)
 			{
-				DEBUG_LogMessage("----Eating food\n");
+				DEBUG_LogMessage("----Eating food (%i)\n", bestFood.EnergyAmount);
 				UseItemInInventory(bestFoodIndex);
-				RemoveItemFromInventory(bestFoodIndex); // One time use item
+				RemoveItemFromInventory(bestFoodIndex);
 			}
 		}
 	}
 
 
-	pBlackboard->GetData("CurrentBehaviour", m_CurrentSteeringBehaviour);
-	SteeringOutput steeringOutput = m_CurrentSteeringBehaviour->CalculateSteering(dt, agentInfo);
+	SteeringOutput steeringOutput = m_pBlendedBehaviour->CalculateSteering(dt, agentInfo);
 
 
 	PluginOutput output = {};
@@ -1154,21 +1149,6 @@ void TestBoxPlugin::ConstructHouse(const HouseInfo& houseInfo, House& house)
 	house.SecondsSinceLastVisit = m_SecondsBetweenHouseRevisits + 1.0f; // Flag so we know to go in here
 	house.Unexplored = true;
 }
-
-//int TestBoxPlugin::InventoryItemCount(eItemType itemType)
-//{
-//	int count = 0;
-//
-//	for (size_t i = 0; i < m_Inventory.size(); i++)
-//	{
-//		if (m_Inventory[i].itemInfo.Type == itemType)
-//		{
-//			++count;
-//		}
-//	}
-//
-//	return count;
-//}
 
 int TestBoxPlugin::FirstEmptyInventorySlotID() const
 {

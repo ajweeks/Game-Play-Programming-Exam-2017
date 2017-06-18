@@ -48,8 +48,6 @@ protected:
 	void ConstructEnemy(const EntityInfo& entityInfo, b2Vec2 Position, Enemy& enemy);
 	void ConstructHouse(const HouseInfo& houseInfo, House& house);
 
-	SteeringBehaviours::ISteeringBehaviour* m_CurrentSteeringBehaviour = nullptr;
-
 	float m_SecondsElapsed;
 	float m_SecondsSinceNavMeshTargetUpdate;
 	float m_SecondsBetweenNavMeshTargetUpdates = 0.1f;
@@ -78,6 +76,7 @@ protected:
 	int m_NextHouseIndex = 0; // Keeps track of which house we're visiting next
 	int m_InHouseIndex = -1; // -1 when not in any house
 
+	float m_StartingStamina;
 	float m_StartingEnergy;
 	float m_StartingHealth;
 	int m_BestPistolIndex = -1;
