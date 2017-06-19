@@ -55,8 +55,8 @@ protected:
 
 	BehaviourTree* m_pBehaviourTree = nullptr;
 	SteeringParams m_Goal = {};
-	SteeringParams m_NextNavMeshGoal = {};
 	bool m_GoalSet = false;
+	SteeringParams m_NextNavMeshGoal = {};
 
 	std::vector<SteeringBehaviours::ISteeringBehaviour*> m_BehaviourVec = {};
 	SteeringParams m_AverageNearbyEnemy;

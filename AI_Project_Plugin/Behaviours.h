@@ -657,42 +657,6 @@ inline BehaviourState SetGoalToNextHouse(Blackboard* pBlackboard)
 	return Success;
 }
 
-//inline BehaviourState SetGoalToClosestHouseNotRecentlyVisited(Blackboard* pBlackboard)
-//{
-//	float secondsBetweenRevisits;
-//	std::vector<House>* knownHouses = nullptr;
-//	float maxHealth = 0;
-//	bool dataAvailable =
-//		pBlackboard->GetData("SecondsBetweenHouseRevisits", secondsBetweenRevisits) &&
-//		pBlackboard->GetData("KnownHouses", knownHouses);
-//
-//	if (!dataAvailable)
-//		return Failure;
-//
-//	House closestHouse;
-//	int closestHouseIndex = -1;
-//	for (size_t i = 0; i < knownHouses->size(); i++)
-//	{
-//		if (knownHouses->at(i).SecondsSinceLastVisit >= secondsBetweenRevisits)
-//		{
-//			closestHouse = knownHouses->at(i);
-//			closestHouseIndex = i;
-//		}
-//	}
-//
-//	if (closestHouseIndex != -1)
-//	{
-//		printf("Set goal of house\n");
-//		SteeringParams goal = {};
-//		goal.Position = closestHouse.Info.Center;
-//		pBlackboard->ChangeData("Goal", goal);
-//		pBlackboard->ChangeData("GoalSet", true);
-//		return Success;
-//	}
-//
-//	return Failure;
-//}
-
 // Health
 inline bool NotMaxHealth(Blackboard* pBlackboard)
 {

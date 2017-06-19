@@ -81,9 +81,9 @@ void TestBoxPlugin::Start()
 	m_BehaviourVec.push_back(m_pBlendedBehaviour);
 
 	m_EmptyTargetEnemy = {};
-	m_EmptyTargetEnemy.enemyInfo.EnemyHash = -1;
+	m_EmptyTargetEnemy.enemyInfo.EnemyHash = -1; 
 	
-	auto pBlackboard = new Blackboard;
+	Blackboard* pBlackboard = new Blackboard;
 	pBlackboard->AddData("AgentInfo", &agentInfo);
 	pBlackboard->AddData("Goal", m_Goal);
 	pBlackboard->AddData("GoalSet", m_GoalSet);
